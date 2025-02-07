@@ -14,6 +14,15 @@ Otra tarea lee los datos de la cola y los imprime en consola.
 #include "freertos/semphr.h"
 #include <freertos/queue.h>
 #include "esp_random.h" // Para funcion random
+#include <string.h>     // Para strcpy
+
+// Struct para la cola
+typedef struct
+{
+    int sensorID;
+    char sensorName[20];
+    float value;
+} SensorData;
 
 // Prototipos de funciones
 void tskRandGenerator(void *pvParameters);
@@ -29,15 +38,9 @@ void app_main()
     setUPTasks(); // Luego las tareas
 }
 
-void setUPTasks()
-{
-    xTaskCreate(tskRandGenerator, "taskRand", 2048, NULL, 1, NULL);
-    xTaskCreate(tskPrinter, "taskPrinter", 2048, NULL, 1, NULL);
-}
-
 void setUPQueue()
 {
-    xQueue = xQueueCreate(5, sizeof(int));
+    xQueue = xQueueCreate(5, sizeof(SensorData));
     if (xQueue == NULL)
     {
         printf("Error al crear la cola.\n");
@@ -45,17 +48,27 @@ void setUPQueue()
     }
 }
 
+void setUPTasks()
+{
+    xTaskCreate(tskRandGenerator, "taskRand", 2048, NULL, 1, NULL);
+    xTaskCreate(tskPrinter, "taskPrinter", 2048, NULL, 1, NULL);
+}
+
 void tskRandGenerator(void *pvParameters)
 {
+    SensorData sensorData;
     while (1)
     {
-        int randValue = (esp_random() % 100) + 1; // Genera un número entre 0 y 100
-        printf("Número generado: %d\n", randValue);
+        sensorData.sensorID = (esp_random() % 5) + 1;
+        strcpy(sensorData.sensorName, "DHT11");
+        sensorData.value = ((float)(esp_random() % 1000)) / 10.0; // Valor entre 0.0 y 99.9
+        printf("Generado -> ID: %d, Nombre: %s, Valor: %.1f\n",
+               sensorData.sensorID, sensorData.sensorName, sensorData.value);
 
         // Enviar a la cola
-        if (xQueueSend(xQueue, &randValue, pdMS_TO_TICKS(100)) == pdTRUE)
+        if (xQueueSend(xQueue, &sensorData, pdMS_TO_TICKS(100)) == pdTRUE)
         {
-            printf("Dato enviado a la cola: %d\n", randValue);
+            printf("Dato enviado a la cola\n");
         }
         else
         {
@@ -67,17 +80,19 @@ void tskRandGenerator(void *pvParameters)
 
 void tskPrinter(void *pvParameters)
 {
-    int receivedValue;
+    SensorData receivedData;
     while (1)
     {
 
-        if (xQueueReceive(xQueue, &receivedValue, pdMS_TO_TICKS(5000)) == pdTRUE)
+        if (xQueueReceive(xQueue, &receivedData, pdMS_TO_TICKS(5000)) == pdTRUE)
         {
-            printf("Dato recibido de la cola: %d\n", receivedValue);
+            printf("Recibido\nID: %d\n Nombre: %s\n Valor: %.1f\n\n\n",
+                   receivedData.sensorID, receivedData.sensorName, receivedData.value);
         }
         else
         {
             printf("Error al recibir el dato de la cola.\n");
         }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
