@@ -10,7 +10,7 @@ Utilizar temporizadores de hardware para mover 3 motores paso a paso de manera c
 #include "string.h"
 
 // Definir los pines de paso para los tres motores
-#define STEP_PIN_1 GPIO_NUM_25
+#define STEP_PIN_1 GPIO_NUM_4
 #define STEP_PIN_2 GPIO_NUM_27
 #define STEP_PIN_3 GPIO_NUM_26
 // Definir constantes de comunicacion
@@ -43,19 +43,25 @@ esp_timer_handle_t timer_1, timer_2, timer_3;
 // Función de callback para el temporizador del motor 1
 void IRAM_ATTR timer_isr_motor_1(void *arg)
 {
-    gpio_set_level(STEP_PIN_1, !gpio_get_level(STEP_PIN_1));
+    static bool state_gpio_1 = false;
+    state_gpio_1 = !state_gpio_1;
+    gpio_set_level(STEP_PIN_1, state_gpio_1);
 }
 
 // Función de callback para el temporizador del motor 2
 void IRAM_ATTR timer_isr_motor_2(void *arg)
 {
-    gpio_set_level(STEP_PIN_2, !gpio_get_level(STEP_PIN_2));
+    static bool state_gpio_2 = false;
+    state_gpio_2 = !state_gpio_2;
+    gpio_set_level(STEP_PIN_2, state_gpio_2);
 }
 
 // Función de callback para el temporizador del motor 3
 void IRAM_ATTR timer_isr_motor_3(void *arg)
 {
-    gpio_set_level(STEP_PIN_3, !gpio_get_level(STEP_PIN_3));
+    static bool state_gpio_3 = false;
+    state_gpio_3 = !state_gpio_3;
+    gpio_set_level(STEP_PIN_3, state_gpio_3);
 }
 
 // Configuración de los temporizadores para los tres motores
@@ -164,6 +170,7 @@ static void uart_event_task(void *pvParameters)
                             esp_timer_stop(timer_2);
                             esp_timer_stop(timer_3);
                         }
+                        /*
                         else if (strncmp(cmd_buffer, "SET SPEED ", 10) == 0)
                         {
                             int speed = atoi(cmd_buffer + 10);
@@ -175,12 +182,13 @@ static void uart_event_task(void *pvParameters)
                             esp_timer_start_periodic(timer_2, speed);
                             esp_timer_start_periodic(timer_3, speed);
                         }
+                        
                         else if (strncmp(cmd_buffer, "INFO", 4) == 0)
                         {
                             calculate_rpm(timer_1, "Motor 1");
                             calculate_rpm(timer_2, "Motor 2");
                             calculate_rpm(timer_3, "Motor 3");
-                        }
+                        }*/
                         else
                         {
                             printf("⚠️ Comando no reconocido\n");
@@ -251,8 +259,11 @@ void calculate_rpm(esp_timer_handle_t timer, const char *nombre_motor)
 void app_main()
 {
     // Configuración de los pines de los motores
+    gpio_reset_pin(STEP_PIN_1);
     gpio_set_direction(STEP_PIN_1, GPIO_MODE_OUTPUT);
+    gpio_reset_pin(STEP_PIN_2);
     gpio_set_direction(STEP_PIN_2, GPIO_MODE_OUTPUT);
+    gpio_reset_pin(STEP_PIN_3);
     gpio_set_direction(STEP_PIN_3, GPIO_MODE_OUTPUT);
 
     // Inicializar los temporizadores

@@ -6,11 +6,11 @@
 #include "string.h"
 
 // Definir los pines de paso para los tres motores
-#define STEP_PIN_1 GPIO_NUM_25
-#define STEP_PIN_2 GPIO_NUM_27
-#define STEP_PIN_3 GPIO_NUM_26
+#define STEP_PIN_1 GPIO_NUM_15
+#define STEP_PIN_2 GPIO_NUM_4
+#define STEP_PIN_3 GPIO_NUM_5
 // Finales de carrera para los tres motores
-#define ENDSTOP_PIN_1 GPIO_NUM_15  // Final de carrera motor 1
+#define ENDSTOP_PIN_1 GPIO_NUM_15 // Final de carrera motor 1
 #define ENDSTOP_PIN_2 GPIO_NUM_4  // Final de carrera motor 2
 #define ENDSTOP_PIN_3 GPIO_NUM_5  // Final de carrera motor 3
 // Definir constantes de comunicacion
@@ -21,6 +21,14 @@
 #define CMD_BUFF_SIZE 128
 // Parametros iniciales
 #define DEFAULT_SPEED 20000
+
+// Variables
+static int M1_steps_counter = 0;
+static int T1_pulse_counter = 0;
+static int M2_steps_counter = 0;
+static int T2_pulse_counter = 0;
+static int M3_steps_counter = 0;
+static int T3_pulse_counter = 0;
 
 // Prototipos
 void calculate_rpm(esp_timer_handle_t timer, const char *nombre_motor);
@@ -43,18 +51,33 @@ esp_timer_handle_t timer_1, timer_2, timer_3;
 void IRAM_ATTR timer_isr_motor_1(void *arg)
 {
     gpio_set_level(STEP_PIN_1, !gpio_get_level(STEP_PIN_1));
+    T1_pulse_counter++;
+    if (T1_pulse_counter % 2 == 0)
+    {
+        M1_steps_counter++;
+    }
 }
 
 // Función de callback para el temporizador del motor 2
 void IRAM_ATTR timer_isr_motor_2(void *arg)
 {
     gpio_set_level(STEP_PIN_2, !gpio_get_level(STEP_PIN_2));
+    T2_pulse_counter++;
+    if (T2_pulse_counter % 2 == 0)
+    {
+        M2_steps_counter++;
+    }
 }
 
 // Función de callback para el temporizador del motor 3
 void IRAM_ATTR timer_isr_motor_3(void *arg)
 {
     gpio_set_level(STEP_PIN_3, !gpio_get_level(STEP_PIN_3));
+    T3_pulse_counter++;
+    if (T3_pulse_counter % 2 == 0)
+    {
+        M3_steps_counter++;
+    }
 }
 
 // Configuración de los temporizadores para los tres motores
@@ -179,11 +202,71 @@ static void uart_event_task(void *pvParameters)
                             calculate_rpm(timer_1, "Motor 1");
                             calculate_rpm(timer_2, "Motor 2");
                             calculate_rpm(timer_3, "Motor 3");
+
+                            printf("📊 Información de pasos:\n");
+                            printf("🔹 Motor 1: %d pasos\n", M1_steps_counter);
+                            printf("🔹 Motor 2: %d pasos\n", M2_steps_counter);
+                            printf("🔹 Motor 3: %d pasos\n", M3_steps_counter);
                         }
                         else if (strncmp(cmd_buffer, "HOME", 4) == 0)
                         {
                             printf("🏠 Iniciando homing\n");
                         }
+                        else if (strncmp(cmd_buffer, "M", 1) == 0)
+                        {
+                            int motor_num = cmd_buffer[1] - '0';
+                            int angulo = atoi(cmd_buffer + 3); // + 3 permite saltear los primeros 3 caracteres y quedarnnos con el angulo
+
+                            if (motor_num >= 1 && motor_num <= 3)
+                            {
+                                T1_pulse_counter = 0;
+                                T2_pulse_counter = 0;
+                                T3_pulse_counter = 0;
+
+                                M1_steps_counter = 0;
+                                M2_steps_counter = 0;
+                                M3_steps_counter = 0;
+
+                                printf("🔄 Moviendo Motor %d a %d grados\n", motor_num, angulo);
+
+                                int pasos = (angulo * 200) / 360; // 200 pasos = 360°
+                                esp_timer_handle_t timer;
+
+                                switch (motor_num)
+                                {
+                                case 1:
+                                    timer = timer_1;
+                                    break;
+                                case 2:
+                                    timer = timer_2;
+                                    break;
+                                case 3:
+                                    timer = timer_3;
+                                    break;
+                                default:
+                                    return;
+                                }
+
+                                // Detener el motor antes de moverlo
+                                esp_timer_stop(timer);
+
+                                // Iniciar el temporizador con velocidad fija
+                                esp_timer_start_periodic(timer, DEFAULT_SPEED);
+
+                                // Esperar a que se completen los pasos (bloqueante, opcionalmente cambiar a tarea)
+                                vTaskDelay(pdMS_TO_TICKS(pasos * (DEFAULT_SPEED / 1000)));
+
+                                // Detener el motor después de alcanzar el ángulo
+                                esp_timer_stop(timer);
+
+                                printf("✅ Motor %d alcanzó %d grados\n", motor_num, angulo);
+                            }
+                            else
+                            {
+                                printf("⚠️ Número de motor inválido\n");
+                            }
+                        }
+
                         else
                         {
                             printf("⚠️ Comando no reconocido\n");
