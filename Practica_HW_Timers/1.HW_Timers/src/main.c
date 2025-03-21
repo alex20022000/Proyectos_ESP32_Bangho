@@ -10,9 +10,9 @@ Utilizar temporizadores de hardware para mover 3 motores paso a paso de manera c
 #include "string.h"
 
 // Definir los pines de paso para los tres motores
-#define STEP_PIN_1 GPIO_NUM_4
-#define STEP_PIN_2 GPIO_NUM_27
-#define STEP_PIN_3 GPIO_NUM_26
+#define STEP_PIN_1 GPIO_NUM_14
+#define STEP_PIN_2 GPIO_NUM_16
+#define STEP_PIN_3 GPIO_NUM_19
 // Definir constantes de comunicacion
 #define BUF_SIZE 1024
 #define RX_PIN 3

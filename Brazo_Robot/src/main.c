@@ -7,12 +7,15 @@
 
 // Definir los pines de paso para los tres motores
 #define STEP_PIN_1 GPIO_NUM_15
-#define STEP_PIN_2 GPIO_NUM_4
+#define STEP_PIN_2 GPIO_NUM_16
 #define STEP_PIN_3 GPIO_NUM_5
+#define DIR_PIN_1 GPIO_NUM_13
+#define DIR_PIN_2 GPIO_NUM_4
+#define DIR_PIN_3 GPIO_NUM_18
 // Finales de carrera para los tres motores
-#define ENDSTOP_PIN_1 GPIO_NUM_15 // Final de carrera motor 1
-#define ENDSTOP_PIN_2 GPIO_NUM_4  // Final de carrera motor 2
-#define ENDSTOP_PIN_3 GPIO_NUM_5  // Final de carrera motor 3
+//#define ENDSTOP_PIN_1 GPIO_NUM_36 // Final de carrera motor 1
+//#define ENDSTOP_PIN_2 GPIO_NUM_34  // Final de carrera motor 2
+//#define ENDSTOP_PIN_3 GPIO_NUM_35  // Final de carrera motor 3
 // Definir constantes de comunicacion
 #define BUF_SIZE 1024
 #define RX_PIN 3
@@ -50,7 +53,9 @@ esp_timer_handle_t timer_1, timer_2, timer_3;
 // Función de callback para el temporizador del motor 1
 void IRAM_ATTR timer_isr_motor_1(void *arg)
 {
-    gpio_set_level(STEP_PIN_1, !gpio_get_level(STEP_PIN_1));
+    static bool state_gpio_1 = false;
+    state_gpio_1 = !state_gpio_1;
+    gpio_set_level(STEP_PIN_1, state_gpio_1);
     T1_pulse_counter++;
     if (T1_pulse_counter % 2 == 0)
     {
@@ -61,7 +66,9 @@ void IRAM_ATTR timer_isr_motor_1(void *arg)
 // Función de callback para el temporizador del motor 2
 void IRAM_ATTR timer_isr_motor_2(void *arg)
 {
-    gpio_set_level(STEP_PIN_2, !gpio_get_level(STEP_PIN_2));
+    static bool state_gpio_2 = false;
+    state_gpio_2 = !state_gpio_2;
+    gpio_set_level(STEP_PIN_2, state_gpio_2);
     T2_pulse_counter++;
     if (T2_pulse_counter % 2 == 0)
     {
@@ -72,7 +79,9 @@ void IRAM_ATTR timer_isr_motor_2(void *arg)
 // Función de callback para el temporizador del motor 3
 void IRAM_ATTR timer_isr_motor_3(void *arg)
 {
-    gpio_set_level(STEP_PIN_3, !gpio_get_level(STEP_PIN_3));
+    static bool state_gpio_3 = false;
+    state_gpio_3 = !state_gpio_3;
+    gpio_set_level(STEP_PIN_3, state_gpio_3);
     T3_pulse_counter++;
     if (T3_pulse_counter % 2 == 0)
     {
