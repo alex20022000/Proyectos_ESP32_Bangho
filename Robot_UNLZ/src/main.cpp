@@ -12,6 +12,8 @@
 #define ENDSTOP_SW1_PIN 36
 #define ENDSTOP_SW2_PIN 34
 #define ENDSTOP_SW3_PIN 35
+#define ANTIHORARIO LOW
+#define HORARIO HIGH
 
 // Variables globales para estados de finales de carrera
 volatile bool end_sw1 = false;
@@ -19,7 +21,25 @@ volatile bool end_sw2 = false;
 volatile bool end_sw3 = false;
 
 // Variable que guarda el salto de angulo actual
-float stepAngle = 1.8; // Valor por defecto (Full Step)
+float stepAngle = 1.8/16; // Valor por defecto (1/16 Step)
+
+// Variable de cant de pasos por revolucion, por defecto para full step
+int stepsPerRev = round(360.0 / stepAngle); // Valor por defecto (Full Step)
+
+// Variable para modificar el tiempo entre cambio de flancos (us)
+unsigned long deltaPulseTime = 1500; // Tiempo default
+
+// Modos de microstepping
+int microsteppingMode = 4; // Modo por defecto
+String microsteppingModes[8] = {
+    "0 - > Full Step (1/1) -> Default -> 1.8°",
+    "1 - > Half Step (1/2) -> " + String(1.8 / 2) + "°",
+    "2 - > 1/4 Step -> " + String(1.8 / 4) + "°",
+    "3 - > 1/8 Step -> " + String(1.8 / 8) + "°",
+    "4 - > 1/16 Step -> " + String(1.8 / 16) + "°",
+    "5 - > 1/32 Step -> " + String(1.8 / 32) + "°",
+    "6 - > 1/32 Step -> " + String(1.8 / 32) + "°",
+    "7 - > 1/32 Step -> " + String(1.8 / 32) + "°"};
 
 // Configuracion de interrupciones para los finales de carrera
 // attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), int_sw1, CHANGE);
@@ -30,9 +50,18 @@ float stepAngle = 1.8; // Valor por defecto (Full Step)
 void home();
 void moveMotor(int motor, int steps);
 void moverPasos(int stepPin, int dirPin, int pasos);
+int angleToSteps(float angulo);
 void setMicrostepping(int mode);
+void setStepsPerRev();
+void setDeltaPulseTime(unsigned long deltaPulseTime);
+float getPulsePeriod();
+float getPulseFrecuency();
 void procesarComandoStep(String command);
+void procesarComandoDelta(String command);
+void procesarComandoAng(String command);
 void mostrarMenuMicrostepping();
+void mostrarInfo();
+float calculateRPM();
 
 void setup()
 {
@@ -55,7 +84,8 @@ void setup()
   pinMode(M1_PIN, OUTPUT);
   pinMode(M2_PIN, OUTPUT);
   delayMicroseconds(1000);
-  setMicrostepping(0); // Full Step (1/1)
+  setMicrostepping(4); // Step (1/16)
+  setDeltaPulseTime(deltaPulseTime);
   // Mensaje de bienvenida
   Serial.println("🚀 Ingrese 'home' para iniciar");
 }
@@ -90,18 +120,28 @@ void loop()
         Serial.println("❌ Comando inválido. Use: move <motor> <pasos>");
       }
     }
+    // Procesar el comando "move <motor> <modo>"
     else if (command.startsWith("step"))
     {
       procesarComandoStep(command);
     }
-
-    else if (command == "ang")
+    // Procesar el comando "ang <motor> <angulo>"
+    else if (command.startsWith("ang"))
     {
-      // Mover a un ángulo
+      procesarComandoAng(command);
+    }
+    // Procesar el comando "delta <valor> [us]"
+    else if (command.startsWith("delta"))
+    {
+      procesarComandoDelta(command);
+    }
+    else if (command == "info")
+    {
+      mostrarInfo();
     }
     else
     {
-      Serial.println("Command unrrecognized");
+      Serial.println("Command unrecognized");
     }
   }
 }
@@ -112,9 +152,9 @@ void home()
   Serial.println("Checking endstops states...");
 
   // Config direcciones hacia finales de carrera
-  digitalWrite(DIR_PIN_Q1, HIGH);
-  digitalWrite(DIR_PIN_Q2, HIGH);
-  digitalWrite(DIR_PIN_Q3, HIGH);
+  digitalWrite(DIR_PIN_Q1, HORARIO);     // Horaria
+  digitalWrite(DIR_PIN_Q2, HORARIO);     // Horaria
+  digitalWrite(DIR_PIN_Q3, ANTIHORARIO); // Anti-Horaria
 
   // Verificar si algun final de carrera se encuentra pisado
   bool sw1 = digitalRead(ENDSTOP_SW1_PIN);
@@ -191,7 +231,7 @@ void moveMotor(int motor, int steps)
   }
 
   // Definir dirección del movimiento
-  digitalWrite(dirPin, (steps > 0) ? HIGH : LOW);
+  digitalWrite(dirPin, (steps > 0) ? HORARIO : ANTIHORARIO); // High para horario, Low para antihorario
 
   // Mover la cantidad de pasos solicitada
   moverPasos(stepPin, dirPin, abs(steps));
@@ -203,9 +243,9 @@ void moverPasos(int stepPin, int dirPin, int pasos)
   for (int i = 0; i < pasos; i++)
   {
     digitalWrite(stepPin, HIGH);
-    delayMicroseconds(15000);
+    delayMicroseconds(deltaPulseTime);
     digitalWrite(stepPin, LOW);
-    delayMicroseconds(15000);
+    delayMicroseconds(deltaPulseTime);
   }
   Serial.println("✅ Movimiento completado.");
 }
@@ -213,20 +253,22 @@ void moverPasos(int stepPin, int dirPin, int pasos)
 // === FUNCION PARA CAMBIAR EL MODO DE MICROSTEPPING ===
 void setMicrostepping(int mode)
 {
-  const bool modes[6][3] = {
-      {LOW, LOW, LOW},   // Full Step (1/1)
-      {HIGH, LOW, LOW},  // Half Step (1/2)
-      {LOW, HIGH, LOW},  // 1/4 Step
-      {HIGH, HIGH, LOW}, // 1/8 Step
-      {LOW, LOW, HIGH},  // 1/16 Step
-      {HIGH, LOW, HIGH}  // 1/32 Step
+  const bool modes[8][3] = {
+      {LOW, LOW, LOW},   // Paso completo (1/1)
+      {HIGH, LOW, LOW},  // Medio paso (1/2)
+      {LOW, HIGH, LOW},  // 1/4 de paso
+      {HIGH, HIGH, LOW}, // 1/8 de paso
+      {LOW, LOW, HIGH},  // 1/16 de paso
+      {HIGH, LOW, HIGH}, // 1/32 de paso
+      {LOW, HIGH, HIGH}, // 1/32 de paso
+      {HIGH, HIGH, HIGH} // 1/32 de paso
   };
 
-  const float stepAngles[6] = {1.8, 0.9, 0.45, 0.225, 0.1125, 0.05625};
+  const float stepAngles[8] = {1.8, 1.8 / 2, 1.8 / 4, 1.8 / 8, 1.8 / 16, 1.8 / 32, 1.8 / 32, 1.8 / 32};
 
-  if (mode < 0 || mode > 5)
+  if (mode < 0 || mode > 7)
   {
-    Serial.println("❌ Modo inválido. Use un valor entre 0 y 5.");
+    Serial.println("❌ Modo inválido. Use un valor entre 0 y 7.");
     return;
   }
 
@@ -238,35 +280,143 @@ void setMicrostepping(int mode)
   // Actualizar el ángulo por paso
   stepAngle = stepAngles[mode];
 
+  // Actualizar la cantidad de pasos por revolución
+  setStepsPerRev();
+
+  // Actualizar el modo actual en la variable global
+  microsteppingMode = mode;
+
   Serial.print("✅ Microstepping ajustado a: ");
-  Serial.println(mode);
+  Serial.println(microsteppingModes[mode]);
   Serial.print("📏 Paso angular actual: ");
   Serial.print(stepAngle);
   Serial.println("°");
 }
 
 // === FUNCION PARA PROCESAR EL COMANDO <STEP> ===
-void procesarComandoStep(String command) {
-  if (command == "step") {
-      mostrarMenuMicrostepping();
-  } else {
-      int mode;
-      if (sscanf(command.c_str(), "step %d", &mode) == 1) {
-          setMicrostepping(mode);
-      } else {
-          Serial.println("❌ Comando inválido. Use: step <modo> (0 a 5)");
-      }
+void procesarComandoStep(String command)
+{
+  if (command == "step")
+  {
+    mostrarMenuMicrostepping();
+  }
+  else
+  {
+    int mode;
+    if (sscanf(command.c_str(), "step %d", &mode) == 1)
+    {
+      setMicrostepping(mode);
+    }
+    else
+    {
+      Serial.println("❌ Comando inválido. Use: step <modo> (0 a 5)");
+    }
   }
 }
 
 // === FUNCION QUE MUESTRA EL MENU DE MODIFICACION DE MICROSTEPPING ===
-void mostrarMenuMicrostepping() {
+void mostrarMenuMicrostepping()
+{
   Serial.println("\n🔧 Seleccione la resolución deseada:");
-  Serial.println("0. Full Step [1/1 ; 1.8°]");
-  Serial.println("1. Half Step [1/2 ; 0.9°]");
-  Serial.println("2. 1/4 Step  [1/4 ; 0.45°]");
-  Serial.println("3. 1/8 Step  [1/8 ; 0.225°]");
-  Serial.println("4. 1/16 Step [1/16 ; 0.1125°]");
-  Serial.println("5. 1/32 Step [1/32 ; 0.05625°]");
+  Serial.println("0. Paso completo [1/1 ; 1.8°]");
+  Serial.println("1. Medio paso [1/2 ; 0.9°]");
+  Serial.println("2. 1/4 de paso [1/4 ; 0.45°]");
+  Serial.println("3. 1/8 de paso [1/8 ; 0.225°]");
+  Serial.println("4. 1/16 de paso [1/16 ; 0.1125°]");
+  Serial.println("5. 1/32 de paso [1/32 ; 0.05625°]");
+  Serial.println("6. 1/32 de paso [1/32 ; 0.05625°]");
+  Serial.println("7. 1/32 de paso [1/32 ; 0.05625°]");
   Serial.println("👉 Ingrese el número de la opción:");
+}
+
+void procesarComandoDelta(String command)
+{
+  long value;
+  if (sscanf(command.c_str(), "delta %ld", &value) == 1)
+  {
+    setDeltaPulseTime(value);
+  }
+  else
+  {
+    Serial.println("❌ Comando inválido. Use: delta <valor>");
+  }
+}
+
+void setDeltaPulseTime(unsigned long value)
+{
+  deltaPulseTime = value;
+  Serial.print("✅ Tiempo entre flancos ajustado a: ");
+  Serial.print(deltaPulseTime);
+  Serial.println("µs");
+}
+
+void procesarComandoAng(String command)
+{
+  int motor;
+  float grados;
+  if (sscanf(command.c_str(), "ang %d %f", &motor, &grados) == 2)
+  {
+    int pasos = angleToSteps(grados);
+    Serial.print("Moviendo motor ");
+    Serial.print(motor);
+    Serial.print(" ");
+    Serial.print(grados);
+    Serial.print("° (");
+    Serial.print(pasos);
+    Serial.println(" pasos)");
+    moveMotor(motor, pasos);
+  }
+  else
+  {
+    Serial.println("❌ Comando inválido. Use: ang <motor> <grados>");
+  }
+}
+int angleToSteps(float angulo)
+{
+  return (int)round(angulo / stepAngle);
+}
+
+void setStepsPerRev()
+{
+  stepsPerRev = (int)round(360.0 / stepAngle);
+}
+
+float calculateRPM()
+{
+  float RPM = (getPulseFrecuency() * 60) / stepsPerRev;
+  return RPM;
+}
+
+float getPulsePeriod()
+{
+  return deltaPulseTime * 2 / 1000000.0; // de us a segundos
+}
+float getPulseFrecuency()
+{
+  return 1 / getPulsePeriod(); // en Hz
+}
+
+void mostrarInfo()
+{
+  Serial.println("\n====  Información Actual ====");
+  Serial.print("Modo de Microstepping: ");
+  Serial.println(microsteppingModes[microsteppingMode]);
+  Serial.print("Paso angular: ");
+  Serial.print(stepAngle);
+  Serial.println("°");
+  Serial.print("Pasos por revolución: ");
+  Serial.println(stepsPerRev);
+  Serial.print("ΔT pulso: ");
+  Serial.print(deltaPulseTime);
+  Serial.println(" µs");
+  Serial.print("Período del pulso: ");
+  Serial.print(getPulsePeriod(),6);
+  Serial.println(" s");
+  Serial.print("Frecuencia del pulso: ");
+  Serial.print(getPulseFrecuency(),6);
+  Serial.println(" Hz");
+  Serial.print("Velocidad: ");
+  Serial.print(calculateRPM(),6);
+  Serial.println(" RPM");
+  Serial.println("============================\n");
 }
