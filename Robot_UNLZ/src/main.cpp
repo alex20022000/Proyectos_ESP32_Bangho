@@ -21,7 +21,7 @@ volatile bool end_sw2 = false;
 volatile bool end_sw3 = false;
 
 // Variable que guarda el salto de angulo actual
-float stepAngle = 1.8/16; // Valor por defecto (1/16 Step)
+float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
 
 // Variable de cant de pasos por revolucion, por defecto para full step
 int stepsPerRev = round(360.0 / stepAngle); // Valor por defecto (Full Step)
@@ -41,6 +41,12 @@ String microsteppingModes[8] = {
     "6 - > 1/32 Step -> " + String(1.8 / 32) + "°",
     "7 - > 1/32 Step -> " + String(1.8 / 32) + "°"};
 
+// Rampa de aceleracion - configuración de la rampa trapezoidal
+bool usarRampa = true;                // Booleano para activar/desactivar la rampa
+int acelFactor = 50;
+unsigned long MIN_SPEED = deltaPulseTime + ((acelFactor/100.0) * deltaPulseTime); // Tiempo en µs para velocidad mínima (más lento = mayor delay)
+unsigned long MAX_SPEED = deltaPulseTime - ((acelFactor/100.0) * deltaPulseTime); // Tiempo en µs para velocidad máxima (más rápido = menor delay)
+
 // Configuracion de interrupciones para los finales de carrera
 // attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), int_sw1, CHANGE);
 // attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), int_sw2, CHANGE);
@@ -50,6 +56,7 @@ String microsteppingModes[8] = {
 void home();
 void moveMotor(int motor, int steps);
 void moverPasos(int stepPin, int dirPin, int pasos);
+void moverPasosTrapezoidal(int stepPin, int dirPin, int pasos);
 int angleToSteps(float angulo);
 void setMicrostepping(int mode);
 void setStepsPerRev();
@@ -234,7 +241,12 @@ void moveMotor(int motor, int steps)
   digitalWrite(dirPin, (steps > 0) ? HORARIO : ANTIHORARIO); // High para horario, Low para antihorario
 
   // Mover la cantidad de pasos solicitada
-  moverPasos(stepPin, dirPin, abs(steps));
+  if (usarRampa)
+    moverPasosTrapezoidal(stepPin, dirPin, abs(steps));
+  else
+  {
+    moverPasos(stepPin, dirPin, abs(steps));
+  }
 }
 
 // === FUNCION PARA MOVER UN NUMERO DE PASOS ===
@@ -248,6 +260,41 @@ void moverPasos(int stepPin, int dirPin, int pasos)
     delayMicroseconds(deltaPulseTime);
   }
   Serial.println("✅ Movimiento completado.");
+}
+
+void moverPasosTrapezoidal(int stepPin, int dirPin, int pasos)
+{
+  int totalSteps = pasos;
+  int accelSteps = totalSteps / 3;
+  int decelSteps = totalSteps / 3;
+  int constSteps = totalSteps - accelSteps - decelSteps;
+  unsigned long currentDelay = MIN_SPEED; // Comenzamos con la velocidad más lenta
+  unsigned long deltaDelay = (accelSteps > 0) ? (MIN_SPEED - MAX_SPEED) / accelSteps : 0;
+
+  for (int i = 0; i < totalSteps; i++)
+  {
+    digitalWrite(stepPin, HIGH);
+    delayMicroseconds(currentDelay);
+    digitalWrite(stepPin, LOW);
+    delayMicroseconds(currentDelay);
+
+    // Fase de aceleración
+    if (i < accelSteps && currentDelay > MAX_SPEED)
+    {
+      currentDelay = currentDelay - deltaDelay;
+      if (currentDelay < MAX_SPEED)
+        currentDelay = MAX_SPEED;
+    }
+    // Fase constante: no se modifica la velocidad (se mantiene en MAX_SPEED)
+    // Fase de desaceleración
+    else if (i >= (accelSteps + constSteps) && currentDelay < MIN_SPEED)
+    {
+      currentDelay = currentDelay + deltaDelay;
+      if (currentDelay > MIN_SPEED)
+        currentDelay = MIN_SPEED;
+    }
+  }
+  Serial.println("✅ Movimiento completado con rampa trapezoidal.");
 }
 
 // === FUNCION PARA CAMBIAR EL MODO DE MICROSTEPPING ===
@@ -410,13 +457,13 @@ void mostrarInfo()
   Serial.print(deltaPulseTime);
   Serial.println(" µs");
   Serial.print("Período del pulso: ");
-  Serial.print(getPulsePeriod(),6);
+  Serial.print(getPulsePeriod(), 6);
   Serial.println(" s");
   Serial.print("Frecuencia del pulso: ");
-  Serial.print(getPulseFrecuency(),6);
+  Serial.print(getPulseFrecuency(), 6);
   Serial.println(" Hz");
   Serial.print("Velocidad: ");
-  Serial.print(calculateRPM(),6);
+  Serial.print(calculateRPM(), 6);
   Serial.println(" RPM");
   Serial.println("============================\n");
 }
