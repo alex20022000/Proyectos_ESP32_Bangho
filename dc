@@ -1,0 +1,137 @@
+[33mcommit f41c2c941317005a44c75a921d0b13afd2a34898[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Fri Mar 21 16:52:39 2025 -0300
+
+    Modifico el step delay del test DRV8825
+
+[33mcommit 3856f456df328ab2e78b2702e70447641b364a45[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Fri Mar 21 12:13:30 2025 -0300
+
+    Modifico el step delay del test DRV8825
+
+[33mcommit aa786115cfad2cf0ba36166a692b7f8fc3b552d3[m
+Author: alex20022000 <alexh.drp@gmail.com>
+Date:   Fri Mar 21 11:06:03 2025 -0300
+
+    Agrego test DRV8825
+
+[33mcommit d36a94559b2ddd19d5c33ef52e0e9b041dd53040[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Wed Feb 19 17:19:47 2025 -0300
+
+    Modifico las ISR de los timers y saco el gpio_get_level porque no se puede usar con gpios como salidas
+
+[33mcommit 0f2f1a9b0a16da900242384fa9cc5fab0476d77a[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Wed Feb 19 10:34:17 2025 -0300
+
+    Agrego cambios que faltaban
+
+[33mcommit f69fe1d6470e223f3c8e39245d72188c3d63127c[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Thu Feb 13 15:00:18 2025 -0300
+
+    Agrego proyecto para probar brazo robot con RTOS
+
+[33mcommit c558e38d2a36a65721b43faf51846eacf7706213[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Thu Feb 13 14:59:43 2025 -0300
+
+    Agrego practica con varias interrupciones de GPIOS con una sola ISR
+
+[33mcommit b8fecf232aa0ccbd0770a07391daefef13deaf28[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Wed Feb 12 17:12:16 2025 -0300
+
+    Agrego testeo del AS5600
+
+[33mcommit b2af4709e8396b3c10489210de271d9d9315cd9d[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Wed Feb 12 15:58:45 2025 -0300
+
+    Agrego ejercicio de 3 timers de HW controlados por comandos serie
+
+[33mcommit 6a34335f9d642cbe8ac25765bd1ab795d245d402[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Tue Feb 11 11:21:55 2025 -0300
+
+    Agrego ejercicio 5.2
+
+[33mcommit 90c7bcb5d50d268d7e80807f0541f46a71268887[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Mon Feb 10 11:19:25 2025 -0300
+
+    Agrego ejercicio 4.2
+
+[33mcommit d960fa5b959aef2390135b5e71b58ed7e87bbb4f[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Fri Feb 7 17:13:50 2025 -0300
+
+    Agrego ejercicio 4.2 con warnings
+
+[33mcommit b14a7ca253b2729d14647fd1c68747471b4c3cd9[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Fri Feb 7 15:53:57 2025 -0300
+
+    Agrego ejercicio 4.1
+
+[33mcommit 53d425e561128776f4fc74477fb1aa0c703cd77b[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Fri Feb 7 14:13:32 2025 -0300
+
+    Agrego ejercicio 2.3
+
+[33mcommit b2fb24bb36286e06de4d465889b9743303b22b75[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Fri Feb 7 11:34:23 2025 -0300
+
+    Agrego ejercicio 3.1 y 3.2
+
+[33mcommit 2c11a15e54e57cac7b1f709f31c277c4abef7cd9[m
+Author: alex20022000 <alexh.drp@gmail.com>
+Date:   Thu Feb 6 22:59:43 2025 -0300
+
+    Agrego ejercicio 2.2 con desafio de structs en una cola
+
+[33mcommit b34577a564e938986d691669640cbbdb112958fe[m
+Author: alex20022000 <alexh.drp@gmail.com>
+Date:   Thu Feb 6 22:42:13 2025 -0300
+
+    Agrego ejercicio 2.2
+
+[33mcommit 57b02009193e5d746b3ebd65ea9f94346e43cec5[m
+Author: alex20022000 <alexh.drp@gmail.com>
+Date:   Thu Feb 6 21:07:46 2025 -0300
+
+    Agrego pequeño cambio en ejercicio 2.1
+
+[33mcommit e0bfe732ff7c34dc8a6f75665e12e00bce78f34a[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Thu Feb 6 17:21:56 2025 -0300
+
+    Agrego ejercicio 2.1
+
+[33mcommit 2db71f36e6250d30c010a2de0b7fb82a0976312a[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Thu Feb 6 16:56:10 2025 -0300
+
+    Agrego ejercicio 1.2
+
+[33mcommit b08a8f75ef387cd677f40e6ebafd5134f22e1c8d[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Thu Feb 6 16:30:19 2025 -0300
+
+    Agrego ejercicio 1.1
+
+[33mcommit 7fc6029c00edfa30f55959b384f6c9ac49f2f312[m
+Author: Alex_Bangho <adalle@hitec.com>
+Date:   Thu Jan 30 08:25:14 2025 -0300
+
+    Agrego ejemplo de Semaforos de conteo
+
+[33mcommit 491f79eb70aad78e43da8e4fee0f181aeda2dff7[m
+Author: Alexander Dalle <adalle@hitec.com>
+Date:   Wed Jan 29 14:03:28 2025 -0300
+
+    Primer commit de prueba

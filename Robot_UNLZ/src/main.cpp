@@ -14,11 +14,14 @@
 #define ENDSTOP_SW3_PIN 35
 #define ANTIHORARIO LOW
 #define HORARIO HIGH
+#define PISADO HIGH
+#define NO_PISADO LOW
 
 // Variables globales para estados de finales de carrera
 volatile bool end_sw1 = false;
 volatile bool end_sw2 = false;
 volatile bool end_sw3 = false;
+const int debounceThreshhold = 50; // Tiempo de debounce en ms
 
 // Variable que guarda el salto de angulo actual
 float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
@@ -42,18 +45,14 @@ String microsteppingModes[8] = {
     "7 - > 1/32 Step -> " + String(1.8 / 32) + "°"};
 
 // Rampa de aceleracion - configuración de la rampa trapezoidal
-bool usarRampa = true;                // Booleano para activar/desactivar la rampa
+bool usarRampa = true; // Booleano para activar/desactivar la rampa
 int acelFactor = 50;
-unsigned long MIN_SPEED = deltaPulseTime + ((acelFactor/100.0) * deltaPulseTime); // Tiempo en µs para velocidad mínima (más lento = mayor delay)
-unsigned long MAX_SPEED = deltaPulseTime - ((acelFactor/100.0) * deltaPulseTime); // Tiempo en µs para velocidad máxima (más rápido = menor delay)
-
-// Configuracion de interrupciones para los finales de carrera
-// attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), int_sw1, CHANGE);
-// attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), int_sw2, CHANGE);
-// attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW3_PIN), int_sw3, CHANGE);
+unsigned long MIN_SPEED = deltaPulseTime + ((acelFactor / 100.0) * deltaPulseTime); // Tiempo en µs para velocidad mínima (más lento = mayor delay)
+unsigned long MAX_SPEED = deltaPulseTime - ((acelFactor / 100.0) * deltaPulseTime); // Tiempo en µs para velocidad máxima (más rápido = menor delay)
 
 // Prototipos
 void home();
+void doAStep(int stepPin);
 void moveMotor(int motor, int steps);
 void moverPasos(int stepPin, int dirPin, int pasos);
 void moverPasosTrapezoidal(int stepPin, int dirPin, int pasos);
@@ -63,12 +62,16 @@ void setStepsPerRev();
 void setDeltaPulseTime(unsigned long deltaPulseTime);
 float getPulsePeriod();
 float getPulseFrecuency();
+void capturarEstadoSwitches();
 void procesarComandoStep(String command);
 void procesarComandoDelta(String command);
 void procesarComandoAng(String command);
 void mostrarMenuMicrostepping();
 void mostrarInfo();
 float calculateRPM();
+IRAM_ATTR void ISR_sw1();
+IRAM_ATTR void ISR_sw2();
+IRAM_ATTR void ISR_sw3();
 
 void setup()
 {
@@ -93,6 +96,12 @@ void setup()
   delayMicroseconds(1000);
   setMicrostepping(4); // Step (1/16)
   setDeltaPulseTime(deltaPulseTime);
+  // Configuración de interrupciones para finales de carrera
+  // Configuracion de interrupciones para los finales de carrera
+  attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), ISR_sw1, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), ISR_sw2, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW3_PIN), ISR_sw3, CHANGE);
+  capturarEstadoSwitches(); // Leo y guardo el estado de los finales de carrera al inicio
   // Mensaje de bienvenida
   Serial.println("🚀 Ingrese 'home' para iniciar");
 }
@@ -153,7 +162,7 @@ void loop()
   }
 }
 
-// Realizar el homming
+// === FUNCION PARA REALIZAR EL HOMING ===
 void home()
 {
   Serial.println("Checking endstops states...");
@@ -170,49 +179,82 @@ void home()
 
   if (sw1 || sw2 || sw3)
   {
+    // Si alguno de los finales de carrera está pisado, retroceder
+    int angleBack = 15; // Grados a retroceder
+
+    int stepsBack = angleToSteps(angleBack); // Pasos a retroceder
     // Retroceso hasta que se liberen los finales de carrera
     if (sw1)
     {
       Serial.println("SW1 Pressed, going back Q1...");
-      digitalWrite(DIR_PIN_Q1, LOW); // cambiar direccion para alejarse
-      for (int i = 0; i < 11; i++)   // 10 pasos
+      digitalWrite(DIR_PIN_Q1, ANTIHORARIO); // cambiar direccion para alejarse
+      for (int i = 0; i < stepsBack; i++)
       {
         digitalWrite(STEP_PIN_Q1, HIGH);
-        delayMicroseconds(500);
+        delayMicroseconds(deltaPulseTime);
         digitalWrite(STEP_PIN_Q1, LOW);
-        delayMicroseconds(500);
+        delayMicroseconds(deltaPulseTime);
       }
     }
     if (sw2)
     {
       Serial.println("SW2 Pressed, going back Q2...");
-      digitalWrite(DIR_PIN_Q2, LOW); // cambiar direccion para alejarse
-      for (int i = 0; i < 11; i++)   // 10 pasos
+      digitalWrite(DIR_PIN_Q2, ANTIHORARIO); // cambiar direccion para alejarse
+      for (int i = 0; i < stepsBack; i++)
       {
         digitalWrite(STEP_PIN_Q2, HIGH);
-        delayMicroseconds(500);
+        delayMicroseconds(deltaPulseTime);
         digitalWrite(STEP_PIN_Q2, LOW);
-        delayMicroseconds(500);
+        delayMicroseconds(deltaPulseTime);
       }
     }
     if (sw3)
     {
       Serial.println("SW3 Pressed, going back Q3...");
-      digitalWrite(DIR_PIN_Q3, LOW); // cambiar direccion para alejarse
-      for (int i = 0; i < 11; i++)   // 10 pasos
+      digitalWrite(DIR_PIN_Q3, HORARIO); // cambiar direccion para alejarse
+      for (int i = 0; i < stepsBack; i++)
       {
         digitalWrite(STEP_PIN_Q3, HIGH);
-        delayMicroseconds(500);
+        delayMicroseconds(deltaPulseTime);
         digitalWrite(STEP_PIN_Q3, LOW);
-        delayMicroseconds(500);
+        delayMicroseconds(deltaPulseTime);
       }
     }
   }
   Serial.println("Checking endstops OK...");
   // A partir de aca, iniciar la rutina de homing
+  // Setear direccion hacia los finales de carrera
+  digitalWrite(DIR_PIN_Q1, HORARIO);     // Horaria
+  digitalWrite(DIR_PIN_Q2, HORARIO);     // Horaria
+  digitalWrite(DIR_PIN_Q3, ANTIHORARIO); // Anti-Horaria
+
+  // Mover hasta que se presione el final de carrera
+  while (end_sw1 == NO_PISADO)
+  {
+    doAStep(STEP_PIN_Q1);
+  }
+  while (end_sw2 == NO_PISADO)
+  {
+    doAStep(STEP_PIN_Q2);
+  }
+  while (end_sw3 == NO_PISADO)
+  {
+    doAStep(STEP_PIN_Q3);
+  }
+
+  // homming completado
+  Serial.println("🏠✅ Homing completado.");
+}
+// === FUNCION QUE REALIZA UN PASO ===
+void doAStep(int stepPin)
+{
+  digitalWrite(stepPin, HIGH);
+  delayMicroseconds(deltaPulseTime);
+  digitalWrite(stepPin, LOW);
+  delayMicroseconds(deltaPulseTime);
 }
 
-// === FUNCION PARA MOVER UN MOTOR ===
+// === FUNCION PARA MOVER UN MOTOR POR CANT DE PASOS ===
 void moveMotor(int motor, int steps)
 {
   int stepPin, dirPin;
@@ -262,6 +304,7 @@ void moverPasos(int stepPin, int dirPin, int pasos)
   Serial.println("✅ Movimiento completado.");
 }
 
+// === FUNCION MUEVE UN MOTOR UNA CANT DE PASOS CON RAMPA DE ACEL TRAPEZOIDAL ===
 void moverPasosTrapezoidal(int stepPin, int dirPin, int pasos)
 {
   int totalSteps = pasos;
@@ -376,6 +419,7 @@ void mostrarMenuMicrostepping()
   Serial.println("👉 Ingrese el número de la opción:");
 }
 
+// === FUNCION QUE PROCESA EL COMANDO DE CAMVIO DE VELOCIDAD ===
 void procesarComandoDelta(String command)
 {
   long value;
@@ -389,6 +433,7 @@ void procesarComandoDelta(String command)
   }
 }
 
+// === FUNCION QUE SETEA LA VELOCIDAD (TIEMPO ENTRE CAMBIO DE FLANCOS) ===
 void setDeltaPulseTime(unsigned long value)
 {
   deltaPulseTime = value;
@@ -397,6 +442,7 @@ void setDeltaPulseTime(unsigned long value)
   Serial.println("µs");
 }
 
+// === FUNCION QUE PROCESA EL COMANDO PARA MOVER POR ANGULO ===
 void procesarComandoAng(String command)
 {
   int motor;
@@ -418,31 +464,39 @@ void procesarComandoAng(String command)
     Serial.println("❌ Comando inválido. Use: ang <motor> <grados>");
   }
 }
+
+// === FUNCION QUE TRANSFORMA DE ANGULO A PASOS ===
 int angleToSteps(float angulo)
 {
   return (int)round(angulo / stepAngle);
 }
 
+// === FUNCION QUE CALCULA LA CANT DE PASOS POR REV DEPENDIENDO EL MICROSTEPPING SELECCIONADO ===
 void setStepsPerRev()
 {
   stepsPerRev = (int)round(360.0 / stepAngle);
 }
 
+// === FUNCION QUE CALCULA LA VELOCIDAD EN RPM ===
 float calculateRPM()
 {
   float RPM = (getPulseFrecuency() * 60) / stepsPerRev;
   return RPM;
 }
 
+// === FUNCION QUE CALCULA EL PERIODO DEL PULSO STEP ===
 float getPulsePeriod()
 {
   return deltaPulseTime * 2 / 1000000.0; // de us a segundos
 }
+
+// === FUNCION QUE CALCULA LA FRECUENCIA DEL PULSO STEP ===
 float getPulseFrecuency()
 {
   return 1 / getPulsePeriod(); // en Hz
 }
 
+// === FUNCION QUE MUESTRA INFO SOBRE VARIABLES DE INTERES ===
 void mostrarInfo()
 {
   Serial.println("\n====  Información Actual ====");
@@ -466,4 +520,49 @@ void mostrarInfo()
   Serial.print(calculateRPM(), 6);
   Serial.println(" RPM");
   Serial.println("============================\n");
+}
+// === CAPTURA EL ESTADO EN EL MOMENTO DE LOS ENDSTOPS ===
+void capturarEstadoSwitches()
+{
+  end_sw1 = digitalRead(ENDSTOP_SW1_PIN);
+  end_sw2 = digitalRead(ENDSTOP_SW2_PIN);
+  end_sw3 = digitalRead(ENDSTOP_SW3_PIN);
+  Serial.print("Estado SW1: ");
+  Serial.println(end_sw1 ? "PISADO" : "NO PISADO");
+  Serial.print("Estado SW2: ");
+  Serial.println(end_sw2 ? "PISADO" : "NO PISADO");
+  Serial.print("Estado SW3: ");
+  Serial.println(end_sw3 ? "PISADO" : "NO PISADO");
+}
+
+// === INTERRUPCIONES ENDSTOPS ===
+IRAM_ATTR void ISR_sw1()
+{
+  static unsigned long timeStampSW1; // Static no destruye el valor al finalizar la funcion
+
+  if (millis() - timeStampSW1 >= debounceThreshhold)
+  {
+    end_sw1 = !end_sw1;      // Cambia el estado del final de carrera
+    timeStampSW1 = millis(); // Actualiza el timestamp
+  }
+}
+IRAM_ATTR void ISR_sw2()
+{
+  static unsigned long timeStampSW2; // Static no destruye el valor al finalizar la funcion
+
+  if (millis() - timeStampSW2 >= debounceThreshhold)
+  {
+    end_sw2 = !end_sw2;      // Cambia el estado del final de carrera
+    timeStampSW2 = millis(); // Actualiza el timestamp
+  }
+}
+IRAM_ATTR void ISR_sw3()
+{
+  static unsigned long timeStampSW3; // Static no destruye el valor al finalizar la funcion
+
+  if (millis() - timeStampSW3 >= debounceThreshhold)
+  {
+    end_sw3 = !end_sw3;      // Cambia el estado del final de carrera
+    timeStampSW3 = millis(); // Actualiza el timestamp
+  }
 }
