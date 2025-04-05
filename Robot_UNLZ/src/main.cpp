@@ -9,11 +9,11 @@
 #define M0_PIN 32
 #define M1_PIN 33
 #define M2_PIN 25
-#define ENDSTOP_SW1_PIN 36
+#define ENDSTOP_SW1_PIN 35
 #define ENDSTOP_SW2_PIN 34
-#define ENDSTOP_SW3_PIN 35
-#define ANTIHORARIO LOW
-#define HORARIO HIGH
+#define ENDSTOP_SW3_PIN 36
+#define ANTIHORARIO HIGH
+#define HORARIO LOW
 #define PISADO HIGH
 #define NO_PISADO LOW
 
@@ -21,7 +21,7 @@
 volatile bool end_sw1 = false;
 volatile bool end_sw2 = false;
 volatile bool end_sw3 = false;
-const int debounceThreshhold = 50; // Tiempo de debounce en ms
+const int debounceThreshhold = 100; // Tiempo de debounce en ms
 
 // Variable que guarda el salto de angulo actual
 float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
@@ -30,7 +30,9 @@ float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
 int stepsPerRev = round(360.0 / stepAngle); // Valor por defecto (Full Step)
 
 // Variable para modificar el tiempo entre cambio de flancos (us)
-unsigned long deltaPulseTime = 1500; // Tiempo default
+u_int16_t deltaPulseTime = 1500; // Tiempo default
+u_int16_t deltaHommingPulseTime = 1500; // Tiempo default
+
 
 // Modos de microstepping
 int microsteppingMode = 4; // Modo por defecto
@@ -52,7 +54,7 @@ unsigned long MAX_SPEED = deltaPulseTime - ((acelFactor / 100.0) * deltaPulseTim
 
 // Prototipos
 void home();
-void doAStep(int stepPin);
+void doAStep(int stepPin, uint16_t deltaPulseTime);
 void moveMotor(int motor, int steps);
 void moverPasos(int stepPin, int dirPin, int pasos);
 void moverPasosTrapezoidal(int stepPin, int dirPin, int pasos);
@@ -155,6 +157,10 @@ void loop()
     {
       mostrarInfo();
     }
+    else if (command == "switch")
+    {
+      capturarEstadoSwitches();
+    }
     else
     {
       Serial.println("Command unrecognized");
@@ -180,8 +186,8 @@ void home()
   if (sw1 || sw2 || sw3)
   {
     // Si alguno de los finales de carrera está pisado, retroceder
-    int angleBack = 15; // Grados a retroceder
-
+    int angleBack = 40; // Grados a retroceder
+    setMicrostepping(5);
     int stepsBack = angleToSteps(angleBack); // Pasos a retroceder
     // Retroceso hasta que se liberen los finales de carrera
     if (sw1)
@@ -191,9 +197,9 @@ void home()
       for (int i = 0; i < stepsBack; i++)
       {
         digitalWrite(STEP_PIN_Q1, HIGH);
-        delayMicroseconds(deltaPulseTime);
+        delayMicroseconds(deltaHommingPulseTime);
         digitalWrite(STEP_PIN_Q1, LOW);
-        delayMicroseconds(deltaPulseTime);
+        delayMicroseconds(deltaHommingPulseTime);
       }
     }
     if (sw2)
@@ -203,9 +209,9 @@ void home()
       for (int i = 0; i < stepsBack; i++)
       {
         digitalWrite(STEP_PIN_Q2, HIGH);
-        delayMicroseconds(deltaPulseTime);
+        delayMicroseconds(deltaHommingPulseTime);
         digitalWrite(STEP_PIN_Q2, LOW);
-        delayMicroseconds(deltaPulseTime);
+        delayMicroseconds(deltaHommingPulseTime);
       }
     }
     if (sw3)
@@ -215,9 +221,9 @@ void home()
       for (int i = 0; i < stepsBack; i++)
       {
         digitalWrite(STEP_PIN_Q3, HIGH);
-        delayMicroseconds(deltaPulseTime);
+        delayMicroseconds(deltaHommingPulseTime);
         digitalWrite(STEP_PIN_Q3, LOW);
-        delayMicroseconds(deltaPulseTime);
+        delayMicroseconds(deltaHommingPulseTime);
       }
     }
   }
@@ -231,22 +237,23 @@ void home()
   // Mover hasta que se presione el final de carrera
   while (end_sw1 == NO_PISADO)
   {
-    doAStep(STEP_PIN_Q1);
+    doAStep(STEP_PIN_Q1, deltaHommingPulseTime);
   }
   while (end_sw2 == NO_PISADO)
   {
-    doAStep(STEP_PIN_Q2);
+    doAStep(STEP_PIN_Q2, deltaHommingPulseTime);
   }
   while (end_sw3 == NO_PISADO)
   {
-    doAStep(STEP_PIN_Q3);
+    doAStep(STEP_PIN_Q3, deltaHommingPulseTime);
   }
 
   // homming completado
   Serial.println("🏠✅ Homing completado.");
 }
+
 // === FUNCION QUE REALIZA UN PASO ===
-void doAStep(int stepPin)
+void doAStep(int stepPin, uint16_t deltaPulseTime = deltaPulseTime)
 {
   digitalWrite(stepPin, HIGH);
   delayMicroseconds(deltaPulseTime);
@@ -280,7 +287,7 @@ void moveMotor(int motor, int steps)
   }
 
   // Definir dirección del movimiento
-  digitalWrite(dirPin, (steps > 0) ? HORARIO : ANTIHORARIO); // High para horario, Low para antihorario
+  digitalWrite(dirPin, (steps > 0) ? ANTIHORARIO : HORARIO); // High para horario, Low para antihorario
 
   // Mover la cantidad de pasos solicitada
   if (usarRampa)
