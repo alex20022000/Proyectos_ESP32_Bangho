@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Endstops.h>
 
 #define STEP_PIN_Q1 14
 #define STEP_PIN_Q2 16
@@ -9,19 +10,9 @@
 #define M0_PIN 32
 #define M1_PIN 33
 #define M2_PIN 25
-#define ENDSTOP_SW1_PIN 35
-#define ENDSTOP_SW2_PIN 34
-#define ENDSTOP_SW3_PIN 36
 #define ANTIHORARIO HIGH
 #define HORARIO LOW
-#define PISADO HIGH
-#define NO_PISADO LOW
 
-// Variables globales para estados de finales de carrera
-volatile bool end_sw1 = false;
-volatile bool end_sw2 = false;
-volatile bool end_sw3 = false;
-const int debounceThreshhold = 100; // Tiempo de debounce en ms
 
 // Variable que guarda el salto de angulo actual
 float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
@@ -64,16 +55,12 @@ void setStepsPerRev();
 void setDeltaPulseTime(unsigned long deltaPulseTime);
 float getPulsePeriod();
 float getPulseFrecuency();
-void capturarEstadoSwitches();
 void procesarComandoStep(String command);
 void procesarComandoDelta(String command);
 void procesarComandoAng(String command);
 void mostrarMenuMicrostepping();
 void mostrarInfo();
 float calculateRPM();
-IRAM_ATTR void ISR_sw1();
-IRAM_ATTR void ISR_sw2();
-IRAM_ATTR void ISR_sw3();
 
 void setup()
 {
@@ -87,10 +74,7 @@ void setup()
   pinMode(DIR_PIN_Q1, OUTPUT);
   pinMode(DIR_PIN_Q2, OUTPUT);
   pinMode(DIR_PIN_Q3, OUTPUT);
-  // Finales de carrera
-  pinMode(ENDSTOP_SW1_PIN, INPUT); // Solo INPUT ya que tengo resistencias de 10k en pull-down
-  pinMode(ENDSTOP_SW2_PIN, INPUT);
-  pinMode(ENDSTOP_SW3_PIN, INPUT);
+
   // Microstepping default config
   pinMode(M0_PIN, OUTPUT);
   pinMode(M1_PIN, OUTPUT);
@@ -98,12 +82,8 @@ void setup()
   delayMicroseconds(1000);
   setMicrostepping(4); // Step (1/16)
   setDeltaPulseTime(deltaPulseTime);
-  // Configuración de interrupciones para finales de carrera
-  // Configuracion de interrupciones para los finales de carrera
-  attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), ISR_sw1, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), ISR_sw2, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW3_PIN), ISR_sw3, CHANGE);
-  capturarEstadoSwitches(); // Leo y guardo el estado de los finales de carrera al inicio
+
+  captureEndstopStates(); // Leo y guardo el estado de los finales de carrera al inicio
   // Mensaje de bienvenida
   Serial.println("🚀 Ingrese 'home' para iniciar");
 }
@@ -159,7 +139,7 @@ void loop()
     }
     else if (command == "switch")
     {
-      capturarEstadoSwitches();
+      captureEndstopStates();
     }
     else
     {
@@ -528,48 +508,5 @@ void mostrarInfo()
   Serial.println(" RPM");
   Serial.println("============================\n");
 }
-// === CAPTURA EL ESTADO EN EL MOMENTO DE LOS ENDSTOPS ===
-void capturarEstadoSwitches()
-{
-  end_sw1 = digitalRead(ENDSTOP_SW1_PIN);
-  end_sw2 = digitalRead(ENDSTOP_SW2_PIN);
-  end_sw3 = digitalRead(ENDSTOP_SW3_PIN);
-  Serial.print("Estado SW1: ");
-  Serial.println(end_sw1 ? "PISADO" : "NO PISADO");
-  Serial.print("Estado SW2: ");
-  Serial.println(end_sw2 ? "PISADO" : "NO PISADO");
-  Serial.print("Estado SW3: ");
-  Serial.println(end_sw3 ? "PISADO" : "NO PISADO");
-}
 
-// === INTERRUPCIONES ENDSTOPS ===
-IRAM_ATTR void ISR_sw1()
-{
-  static unsigned long timeStampSW1; // Static no destruye el valor al finalizar la funcion
 
-  if (millis() - timeStampSW1 >= debounceThreshhold)
-  {
-    end_sw1 = !end_sw1;      // Cambia el estado del final de carrera
-    timeStampSW1 = millis(); // Actualiza el timestamp
-  }
-}
-IRAM_ATTR void ISR_sw2()
-{
-  static unsigned long timeStampSW2; // Static no destruye el valor al finalizar la funcion
-
-  if (millis() - timeStampSW2 >= debounceThreshhold)
-  {
-    end_sw2 = !end_sw2;      // Cambia el estado del final de carrera
-    timeStampSW2 = millis(); // Actualiza el timestamp
-  }
-}
-IRAM_ATTR void ISR_sw3()
-{
-  static unsigned long timeStampSW3; // Static no destruye el valor al finalizar la funcion
-
-  if (millis() - timeStampSW3 >= debounceThreshhold)
-  {
-    end_sw3 = !end_sw3;      // Cambia el estado del final de carrera
-    timeStampSW3 = millis(); // Actualiza el timestamp
-  }
-}
