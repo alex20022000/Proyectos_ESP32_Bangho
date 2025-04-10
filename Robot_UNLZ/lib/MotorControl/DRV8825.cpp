@@ -23,6 +23,7 @@ void DRV8825::init()
     pinMode(dirPin, OUTPUT);
     setMicrosteppingFactor(16);
     setReduction(reduction);
+    //setDeltaPulseTime(1000);
 }
 
 void DRV8825::setReduction(float _reduction)
