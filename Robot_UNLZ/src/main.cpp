@@ -79,7 +79,7 @@ void setup()
 
 void loop()
 {
-
+  DRV8825 Q1(STEP_PIN_Q1, DIR_PIN_Q1, M0_PIN, M1_PIN, M2_PIN, iQ1, DEFAULT_ANGLE_PER_STEP, 16);
   // Verifica si hay datos en el serial
   if (Serial.available() > 0)
   {
@@ -336,7 +336,7 @@ void setMicrostepping(int mode)
   {
     Serial.println("❌ Modo inválido. Use un valor entre 0 y 7.");
     return;
-  }
+  }   
 
   // Configurar los pines M0, M1 y M2
   digitalWrite(M0_PIN, modes[mode][0]);

@@ -20,5 +20,22 @@
 
 class DRV8825
 {
+    public:
+        DRV8825 (u_int8_t _stepPin, u_int8_t _dirPin, u_int8_t _m0Pin, u_int8_t _m1Pin, u_int8_t _m2Pin, 
+                float _reduction=1.0f, float_t _anglePerStep = DEFAULT_ANGLE_PER_STEP, u_int8_t _microsteppingFactor = 1);
+    private:
+        void init();   
+        void setReduction(float _reduction);
+        float getReduction();
+        void setAnglePerStep();
+        float getAnglePerStep();
+        void setMicrosteppingFactor(u_int8_t _microsteppingFactor);
+        u_int8_t getMicrosteppingFactor();
+        void setStepsPerRev();
+        int getStepsPerRev();
 
-};
+        uint8_t stepPin; u_int8_t dirPin; u_int8_t m0Pin; u_int8_t m1Pin; u_int8_t m2Pin;
+        float reduction; float anglePerStep; u_int8_t microsteppingFactor;uint8_t microsteppingMode;
+        int stepsPerRev;
+
+    };
