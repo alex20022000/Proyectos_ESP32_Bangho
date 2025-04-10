@@ -1,5 +1,4 @@
-#ifndef _ENDSTOPS_H
-#define _ENDSTOPS_H
+#pragma once
 
 #include <Arduino.h>
 
@@ -28,5 +27,3 @@ void captureEndstopStates(); // Captura y muestra el estado de los finales de ca
 IRAM_ATTR void ISR_sw1();
 IRAM_ATTR void ISR_sw2();
 IRAM_ATTR void ISR_sw3();
-
-#endif

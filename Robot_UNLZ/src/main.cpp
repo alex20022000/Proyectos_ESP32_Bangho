@@ -1,17 +1,6 @@
 #include <Arduino.h>
 #include <Endstops.h>
-
-#define STEP_PIN_Q1 14
-#define STEP_PIN_Q2 16
-#define STEP_PIN_Q3 19
-#define DIR_PIN_Q1 13
-#define DIR_PIN_Q2 4
-#define DIR_PIN_Q3 18
-#define M0_PIN 32
-#define M1_PIN 33
-#define M2_PIN 25
-#define ANTIHORARIO HIGH
-#define HORARIO LOW
+#include <DRV8825.h>
 
 
 // Variable que guarda el salto de angulo actual
