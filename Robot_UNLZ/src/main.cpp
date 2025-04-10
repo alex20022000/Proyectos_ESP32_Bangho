@@ -79,7 +79,6 @@ void setup()
 
 void loop()
 {
-  DRV8825 Q1(STEP_PIN_Q1, DIR_PIN_Q1, M0_PIN, M1_PIN, M2_PIN, iQ1, DEFAULT_ANGLE_PER_STEP, 16);
   // Verifica si hay datos en el serial
   if (Serial.available() > 0)
   {
