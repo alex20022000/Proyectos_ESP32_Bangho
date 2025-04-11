@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <Endstops.h>
 #include <DRV8825.h>
-
+#include <Comunication.h>
 
 // Variable que guarda el salto de angulo actual
 float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
@@ -53,8 +53,7 @@ float calculateRPM();
 
 void setup()
 {
-  // Configura el puerto serie
-  Serial.begin(115200);
+  initSerial(); // Inicializa la comunicación serie
   // Configuración de pines
   // Motores
   pinMode(STEP_PIN_Q1, OUTPUT);
@@ -79,61 +78,7 @@ void setup()
 
 void loop()
 {
-  // Verifica si hay datos en el serial
-  if (Serial.available() > 0)
-  {
-    String command = Serial.readStringUntil('\n');
-    command.trim(); // Elimina los espacios al principio y al final
-
-    // Imprimir el comando recibido para depuración
-    Serial.println("Cmd rec -->: " + command);
-
-    if (command == "home")
-    {
-      // Mover a home
-      home();
-    }
-    else if (command.startsWith("move"))
-    {
-      // Procesar el comando "move <motor> <pasos>"
-      int motor, pasos;
-      if (sscanf(command.c_str(), "move %d %d", &motor, &pasos) == 2)
-      {
-        moveMotor(motor, pasos);
-      }
-      else
-      {
-        Serial.println("❌ Comando inválido. Use: move <motor> <pasos>");
-      }
-    }
-    // Procesar el comando "move <motor> <modo>"
-    else if (command.startsWith("step"))
-    {
-      procesarComandoStep(command);
-    }
-    // Procesar el comando "ang <motor> <angulo>"
-    else if (command.startsWith("ang"))
-    {
-      procesarComandoAng(command);
-    }
-    // Procesar el comando "delta <valor> [us]"
-    else if (command.startsWith("delta"))
-    {
-      procesarComandoDelta(command);
-    }
-    else if (command == "info")
-    {
-      mostrarInfo();
-    }
-    else if (command == "switch")
-    {
-      captureEndstopStates();
-    }
-    else
-    {
-      Serial.println("Command unrecognized");
-    }
-  }
+  readSerial();
 }
 
 // === FUNCION PARA REALIZAR EL HOMING ===

@@ -23,7 +23,7 @@ void DRV8825::init()
     pinMode(dirPin, OUTPUT);
     setMicrosteppingFactor(16);
     setReduction(reduction);
-    //setDeltaPulseTime(1000);
+    // setDeltaPulseTime(1000);
 }
 
 void DRV8825::setReduction(float _reduction)
@@ -36,11 +36,12 @@ float DRV8825::getReduction()
 }
 void DRV8825::setAnglePerStep()
 {
-    anglePerStep = anglePerStep/microsteppingFactor;
+    anglePerStep = anglePerStep / microsteppingFactor;
     setStepsPerRev();
 }
-void DRV8825::setStepsPerRev(){
-    stepsPerRev = (int)round(360 / anglePerStep);
+void DRV8825::setStepsPerRev()
+{
+    stepsPerRev = (int)round(reduction * 360 / anglePerStep);
 }
 float DRV8825::getAnglePerStep()
 {
@@ -78,12 +79,12 @@ void DRV8825::setMicrosteppingFactor(uint8_t _microsteppingFactor)
 
     // Paso 2: tabla de estados para M0, M1, M2
     const bool modes[6][3] = {
-        {LOW, LOW, LOW},   // 1
-        {HIGH, LOW, LOW},  // 2
-        {LOW, HIGH, LOW},  // 4
-        {HIGH, HIGH, LOW}, // 8
-        {LOW, LOW, HIGH},  // 16
-        {HIGH, LOW, HIGH}};  // 32
+        {LOW, LOW, LOW},    // 1
+        {HIGH, LOW, LOW},   // 2
+        {LOW, HIGH, LOW},   // 4
+        {HIGH, HIGH, LOW},  // 8
+        {LOW, LOW, HIGH},   // 16
+        {HIGH, LOW, HIGH}}; // 32
 
     // Paso 3: configurar pines
     digitalWrite(m0Pin, modes[index][0]);
@@ -92,4 +93,10 @@ void DRV8825::setMicrosteppingFactor(uint8_t _microsteppingFactor)
 
     // Paso 4: actualizar el ángulo por paso
     setAnglePerStep();
+
+    Serial.print("✅ Microstepping ajustado a: 1/");
+    Serial.println(microsteppingFactor);
+    Serial.print("📏 Paso angular actual: ");
+    Serial.print(getAnglePerStep());
+    Serial.println("°");
 };
