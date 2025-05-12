@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Wire.h>
 
 #define STEP_PIN_Q1 14
 #define STEP_PIN_Q2 16
@@ -22,6 +23,21 @@ volatile bool end_sw1 = false;
 volatile bool end_sw2 = false;
 volatile bool end_sw3 = false;
 const int debounceThreshhold = 100; // Tiempo de debounce en ms
+
+// Constantes de scan del multiplexor
+const byte start_address = 8;
+const byte end_address = 119;
+#define TCAADDR 0x70
+const int I2C_SDA = 21;
+const int I2C_SCL = 22;
+
+// Define las reducciones por motor
+const float reductionQ[4] = {
+  1.0f,  // índice 0 sin usar
+  1.0f,  // motor 1: relación 1:1
+  4.0f,  // motor 2: relación 1:4
+  1.0f   // motor 3: relación 1:1
+};
 
 // Variable que guarda el salto de angulo actual
 float stepAngle = 1.8 / 16; // Valor por defecto (1/16 Step)
@@ -74,6 +90,11 @@ float calculateRPM();
 IRAM_ATTR void ISR_sw1();
 IRAM_ATTR void ISR_sw2();
 IRAM_ATTR void ISR_sw3();
+void scanI2CBus();
+void tcaselect(uint8_t i);
+void encodersInfo();
+uint8_t CheckEncodersStatus();
+uint16_t readEncoder(uint8_t chan_encoder);
 
 void setup()
 {
@@ -104,6 +125,9 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), ISR_sw2, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW3_PIN), ISR_sw3, CHANGE);
   capturarEstadoSwitches(); // Leo y guardo el estado de los finales de carrera al inicio
+  
+  Wire.begin(I2C_SDA, I2C_SCL);
+  scanI2CBus() ; // Escaneo el bus I2C para ver que dispositivos tengo conectados
   // Mensaje de bienvenida
   Serial.println("🚀 Ingrese 'home' para iniciar");
 }
@@ -288,13 +312,14 @@ void moveMotor(int motor, int steps)
 
   // Definir dirección del movimiento
   digitalWrite(dirPin, (steps > 0) ? ANTIHORARIO : HORARIO); // High para horario, Low para antihorario
-
+  // Escala los pasos según la reducción
+  int realSteps = abs(steps) * reductionQ[motor];
   // Mover la cantidad de pasos solicitada
   if (usarRampa)
-    moverPasosTrapezoidal(stepPin, dirPin, abs(steps));
+    moverPasosTrapezoidal(stepPin, dirPin, abs(realSteps));
   else
   {
-    moverPasos(stepPin, dirPin, abs(steps));
+    moverPasos(stepPin, dirPin, abs(realSteps));
   }
 }
 
@@ -527,6 +552,7 @@ void mostrarInfo()
   Serial.print(calculateRPM(), 6);
   Serial.println(" RPM");
   Serial.println("============================\n");
+  encodersInfo(); 
 }
 // === CAPTURA EL ESTADO EN EL MOMENTO DE LOS ENDSTOPS ===
 void capturarEstadoSwitches()
@@ -540,6 +566,184 @@ void capturarEstadoSwitches()
   Serial.println(end_sw2 ? "PISADO" : "NO PISADO");
   Serial.print("Estado SW3: ");
   Serial.println(end_sw3 ? "PISADO" : "NO PISADO");
+}
+
+// === FUNCION QUE ESCANEA EL BUS I2C ===
+void scanI2CBus() {
+  Serial.println("\n🔍 Escaneo completo I2C con TCA9548A y AS5600:");
+
+  // Inicia I2C (suponiendo Wire.begin ya en setup())
+
+  // Verifica que el multiplexor responde en 0x70
+  Serial.print("Probing TCA9548A en 0x70... ");
+  Wire.beginTransmission(0x70);
+  if (Wire.endTransmission() != 0) {
+    Serial.println("FALLO. No se detecta TCA9548A en 0x70!");
+    return;
+  }
+  Serial.println("OK (ACK)");
+
+  // Recorre los 8 canales del multiplexor
+  for (uint8_t ch = 0; ch < 8; ch++) {
+    // Selecciona canal ch
+    Wire.beginTransmission(0x70);
+    Wire.write(1 << ch);
+    Wire.endTransmission();
+    delay(1); // tiempo de conmutación
+
+    Serial.printf("\n— Canal %u —\n", ch);
+
+    // 1) Scan genérico de direcciones
+    bool anyDevice = false;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+      if (addr == 0x70) continue;
+      Wire.beginTransmission(addr);
+      if (Wire.endTransmission() == 0) {
+        Serial.printf(" • Dispositivo I2C en 0x%02X\n", addr);
+        anyDevice = true;
+      }
+    }
+    if (!anyDevice) Serial.println(" • Ningún dispositivo genérico detectado.");
+
+    // 2) Prueba AS5600 en 0x36
+    const uint8_t ASADDR = 0x36;
+    Wire.beginTransmission(ASADDR);
+    if (Wire.endTransmission() == 0) {
+      Serial.println(" ➤ AS5600 detectado, leyendo registros...");
+      // Leer STATUS register (0x0B)
+      Wire.beginTransmission(ASADDR);
+      Wire.write(0x0B);
+      int err1 = Wire.endTransmission();
+      if (err1 == 0) {
+        Wire.requestFrom(ASADDR, (uint8_t)1);
+        if (Wire.available()) {
+          uint8_t status = Wire.read();
+          Serial.printf("    STATUS = 0x%02X\n", status);
+        } else {
+          Serial.println("    ERROR: no hay datos de STATUS");
+        }
+      } else {
+        Serial.printf("    ERROR al leer STATUS: %d\n", err1);
+      }
+      // Leer RAW angle (0x0E,0x0F)
+      Wire.beginTransmission(ASADDR);
+      Wire.write(0x0E);
+      int err2 = Wire.endTransmission();
+      if (err2 == 0) {
+        Wire.requestFrom(ASADDR, (uint8_t)2);
+        if (Wire.available() >= 2) {
+          uint16_t raw = Wire.read();
+          raw = (raw << 8) | Wire.read();
+          raw &= 0x0FFF;
+          Serial.printf("    Raw angle = 0x%03X (%u)\n", raw, raw);
+          float deg = raw * 360.0f / 4096.0f;
+          Serial.printf("    Angle = %.2f°\n", deg);
+        } else {
+          Serial.println("    ERROR: no hay datos de ángulo");
+        }
+      } else {
+        Serial.printf("    ERROR al leer ángulo: %d\n", err2);
+      }
+    } else {
+      Serial.println(" ➤ No responde AS5600 en 0x36");
+    }
+
+    delay(500);
+  }
+
+  Serial.println("\n✅ Escaneo completo.");
+}
+
+
+void tcaselect(uint8_t i) {
+  if (i > 7) return;
+
+  Wire.beginTransmission(TCAADDR);
+  Wire.write(1 << i);
+  Wire.endTransmission();
+  delay(5); 
+}
+
+// === FUNCION QUE DIAGNOSTICA EL ESTADO DE LOS AS5600 ===
+uint8_t CheckEncodersStatus()
+{
+  Wire.beginTransmission(0x36); // Dirección I2C del AS5600
+    Wire.write(0x0B);             // Registro de estado (STATUS register)
+    int error = Wire.endTransmission();
+
+    if (error != 0) {
+        Serial.print("Error en la transmisión I2C: ");
+        Serial.println(error);
+        return 0; // Retorna 0 en caso de error
+    }
+
+    Wire.requestFrom(0x36, 1);    // Solicita 1 byte del registro STATUS
+    if (Wire.available()) {
+        return Wire.read();       // Retorna el valor del STATUS register
+    } else {
+        Serial.println("Error al leer datos del AS5600");
+        return 0; // Retorna 0 si no se reciben los datos esperados
+    }
+}
+
+uint16_t readEncoder()
+{
+    Wire.beginTransmission(0x36); // Dirección I2C del AS5600
+    Wire.write(0x0E);             // Dirección del registro de ángulo (bits 11:8)
+    int error = Wire.endTransmission();
+
+    // Verificar si hubo un error en la transmisión
+    if (error != 0) {
+        Serial.print("Error en la transmisión I2C: ");
+        Serial.println(error);
+        return 0; // Retorna 0 en caso de error
+    }
+
+    // Solicitar 2 bytes del registro de ángulo
+    Wire.requestFrom(0x36, 2); 
+    if (Wire.available() != 2) {
+        Serial.println("Error al leer datos del AS5600");
+        return 0; // Retorna 0 si no se reciben los datos esperados
+    }
+
+    // Leer los dos bytes del ángulo
+    uint16_t angle = Wire.read();        // Lee el primer byte (0x0E)
+    angle = (angle << 8) | Wire.read();  // Lee el segundo byte (0x0F) y combina
+
+    return angle & 0x0FFF; // Aplicar máscara para obtener solo los 12 bits del ángulo
+
+}
+
+// Transformar valor ADC a grados
+double rawToDeg(uint16_t value){
+  return (float)value*360/4095;
+}
+
+// === RUTINA PARA LEER ENCODER ===
+float leerEncoder(uint8_t chan_encoder)
+{
+  uint8_t num_encoder = chan_encoder + 1; // Numero de encoder (1, 2 o 3)
+  tcaselect(chan_encoder); // Selecciona el canal del multiplexor para el encoder 1
+  uint16_t rawValue = readEncoder(); // Valor crudo 12 bits
+  float angleDegrees = rawToDeg(rawValue);
+  
+  uint8_t reduction = reductionQ[num_encoder];
+
+  float realAngle = angleDegrees / reduction; // Aplica la reducción correspondiente
+
+  Serial.println("Encoder: "+String(num_encoder)+"-> "+String(realAngle)+"°");
+  
+  return realAngle; // Retorna el valor en grados
+}
+
+void encodersInfo()
+{
+  leerEncoder(0); // Encoder 1
+  delay(50);
+  leerEncoder(1); // Encoder 2
+  delay(50);
+  leerEncoder(2); // Encoder 3
+  delay(50);
 }
 
 // === INTERRUPCIONES ENDSTOPS ===
