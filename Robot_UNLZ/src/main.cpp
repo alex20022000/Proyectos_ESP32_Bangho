@@ -25,9 +25,9 @@
 const float Q1_MIN = 0.0;
 const float Q1_MAX = 180.0;
 const float Q2_MIN = 0.0;
-const float Q2_MAX = 140.0;
+const float Q2_MAX = 160.0;
 const float Q3_MIN = 0.0;
-const float Q3_MAX = -140.0;
+const float Q3_MAX = -300.0;
 
 const float STEP = 10.0; // resolución del muestreo en mm
 const float X_MIN = -150, X_MAX = +150;
@@ -122,6 +122,7 @@ void procesarComandoAng(String command);
 void procesarComandoRampa(String command);
 void procesarComandoMove3(String command);
 void procesarComandoMoveCoord(String command);
+bool esAlcanzableDesdeHome(float q1, float q2, float q3);
 void mostrarMenuMicrostepping();
 void mostrarInfo();
 float calculateRPM();
@@ -203,10 +204,11 @@ void loop()
     {
       procesarComandoMove3(command);
     }
-    else if (command.startsWith("movecoord")) {
+    else if (command.startsWith("movecoord"))
+    {
       procesarComandoMoveCoord(command);
     }
-    
+
     else if (command.startsWith("move"))
     {
       // Procesar el comando "move <motor> <pasos>"
@@ -275,7 +277,13 @@ void loop()
     Serial.println(angsToMove[i]);
   }
   */
-
+  // inverseKinematics(250.0, 250.0, 140.0);
+  /*
+  for (int i = 0; i < 3; i++)
+  {
+   Serial.println(angsToMove[i]);
+  }
+   */
 }
 
 // === FUNCION PARA REALIZAR EL HOMING ===
@@ -623,6 +631,8 @@ void procesarComandoMove3(String command)
   int parsed = sscanf(command.c_str(), "move3 %f %f %f", &a1, &a2, &a3);
   if (parsed == 3)
   {
+    // Verificar si los ángulos están dentro de los límites
+
     Serial.print("➡️ Moviendo ejes a: ");
     Serial.print(a1);
     Serial.print("°, ");
@@ -637,22 +647,34 @@ void procesarComandoMove3(String command)
     Serial.println("❌ Comando inválido. Use: move3 <ang1> <ang2> <ang3>");
   }
 }
-void procesarComandoMoveCoord(String command) {
+void procesarComandoMoveCoord(String command)
+{
   float px, py, pz;
   int parsed = sscanf(command.c_str(), "movecoord %f %f %f", &px, &py, &pz);
-  if (parsed == 3) {
+  if (parsed == 3)
+  {
     inverseKinematics(px, py, pz);
     float q1 = angsToMove[0],
           q2 = angsToMove[1],
           q3 = angsToMove[2];
     Serial.printf("→ IK: (%.1f,%.1f,%.1f) → q1=%.2f°, q2=%.2f°, q3=%.2f°\n",
                   px, py, pz, q1, q2, q3);
-    move3Motors(q1, q2, q3);
-  } else {
+
+    // Verificar si los ángulos están dentro de los límites
+    if (esAlcanzableDesdeHome(q1, q2, q3) == true)
+    {
+      move3Motors(q1, q2, q3);
+    }
+    else
+    {
+      Serial.println("❌ Posición fuera de los limites de trabajo.");
+    }
+  }
+  else
+  {
     Serial.println("❌ Uso: movecoord <px> <py> <pz>");
   }
 }
-
 
 // === FUNCION QUE TRANSFORMA DE ANGULO A PASOS ===
 int angleToSteps(float angulo)
@@ -1117,45 +1139,60 @@ void inverseKinematics(float px, float py, float pz)
   // 2. Pasaje a grados
   float q2_deg = q2 * (180.0 / PI); // [°]
 
-  angsToMove[0] = q1_deg; 
+  angsToMove[0] = q1_deg;
   angsToMove[1] = q2_deg;
   angsToMove[2] = q3_deg_corrected;
   */
 
-// Entrada: px, py, pz (mm)
-float q1 = atan2(py, px);                  // [rad]
+  // Entrada: px, py, pz (mm)
+  float q1 = atan2(py, px); // [rad]
 
-float num =((pow(px,2)+pow(py,2)+(pow((pz-L1),2)))-pow(L2,2)-pow(L3,2));
-float den =(2*L2*L3);
-float cos_q3 = num / den; 
-cos_q3 = constrain(cos_q3, -1.0, 1.0); // Aseguramos que esté en rango [-1, 1] para evitar NaN
-float q3 = - acos(cos_q3);                  // [rad]
+  float num = ((pow(px, 2) + pow(py, 2) + (pow((pz - L1), 2))) - pow(L2, 2) - pow(L3, 2));
+  float den = (2 * L2 * L3);
+  float cos_q3 = num / den;
+  cos_q3 = constrain(cos_q3, -1.0, 1.0); // Aseguramos que esté en rango [-1, 1] para evitar NaN
+  float q3 = -acos(cos_q3);              // [rad]
 
-// q2
-float num2 = (pz-L1)/sqrt(pow(px,2)+pow(py,2));
-float den2 = (L3*sin(q3))/(L2+(L3*cos(q3)));
-float q2 = atan(num2) - atan(den2);                   // [rad]
+  // q2
+  float num2 = (pz - L1) / sqrt(pow(px, 2) + pow(py, 2));
+  float den2 = (L3 * sin(q3)) / (L2 + (L3 * cos(q3)));
+  float q2 = atan(num2) - atan(den2); // [rad]
 
-// Si quieres grados:
-float q1_deg = q1 * 180.0/PI;
-float q2_deg = q2 * 180.0/PI;
-float q3_deg = q3 * 180.0/PI;
+  // Si quieres grados:
+  float q1_deg = q1 * 180.0 / PI;
+  float q2_deg = q2 * 180.0 / PI;
+  float q3_deg = q3 * 180.0 / PI;
 
-// Corrigo q3 para el offset
-float q3_deg_corrected = q3_deg - Q3_OFFSET;
+  // Corrigo q3 para el offset
+  float q3_deg_corrected = q3_deg - Q3_OFFSET;
 
+  Serial.printf("IK: px=%.2f py=%.2f pz=%.2f → q1=%.2f° q2=%.2f° q3-offset=%.2f° q3=%.2f°\n",
+                px, py, pz, q1_deg, q2_deg, q3_deg, q3_deg_corrected);
 
-Serial.printf("IK: px=%.2f py=%.2f pz=%.2f → q1=%.2f° q2=%.2f° q3-offset=%.2f° q3=%.2f°\n",
-              px, py, pz, q1_deg, q2_deg, q3_deg, q3_deg_corrected);
+  // Corrigo el signo de q3 ya que nuestro motor considera el sentido antihorario positivo
+  // q3_deg_corrected = q3_deg_corrected * -1.0;
 
-// Corrigo el signo de q3 ya que nuestro motor considera el sentido antihorario positivo
-//q3_deg_corrected = q3_deg_corrected * -1.0;
-
-// Resultado
-angsToMove[0] = q1_deg;
-angsToMove[1] = q2_deg;
-angsToMove[2] = q3_deg_corrected;
+  // Resultado
+  angsToMove[0] = q1_deg;
+  angsToMove[1] = q2_deg;
+  angsToMove[2] = q3_deg_corrected;
 }
+
+bool esAlcanzableDesdeHome(float q1, float q2, float q3)
+{
+
+  if (q1 >= Q1_MIN && q1 <= Q1_MAX &&
+      q2 >= Q2_MIN && q2 <= Q2_MAX &&
+      q3 <= Q3_MIN && q3 >= Q3_MAX)
+  {
+    return true;
+  }
+  else
+  {
+    return false;
+  }
+}
+
 void barridoPuntos()
 {
   for (float x = X_MIN; x <= X_MAX; x += STEP)
