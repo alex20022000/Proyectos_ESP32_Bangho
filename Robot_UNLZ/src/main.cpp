@@ -17,7 +17,7 @@
 #define HORARIO LOW
 #define PISADO HIGH
 #define NO_PISADO LOW
-#define L1 136.65
+#define L1 136.65 + 10.0
 #define L2 150
 #define L3 150
 #define Q3_OFFSET 130.0 // Offset de Q3 respecto a la posicion de DH
@@ -63,10 +63,10 @@ int stepsPerRev = round(360.0 / stepAngle); // Valor por defecto (Full Step)
 
 // Variable para modificar el tiempo entre cambio de flancos (us)
 u_int16_t deltaPulseTime = 1500;        // Tiempo default
-u_int16_t deltaHommingPulseTime = 1500; // Tiempo default
+u_int16_t deltaHommingPulseTime = 1500; // Tiempo default home
 
 // Modos de microstepping
-int microsteppingMode = 4; // Modo por defecto
+int microsteppingMode = 6; // Modo por defecto
 String microsteppingModes[8] = {
     "0 - > Full Step (1/1) -> Default -> 1.8°",
     "1 - > Half Step (1/2) -> " + String(1.8 / 2) + "°",
@@ -78,10 +78,10 @@ String microsteppingModes[8] = {
     "7 - > 1/32 Step -> " + String(1.8 / 32) + "°"};
 
 // Rampa de aceleracion - configuración de la rampa trapezoidal
-bool usarRampa = true;                                                              // Booleano para activar/desactivar la rampa
-int acelFactor = 50;                                                                // Acelfactor determina que porcentaje de la velocidad actual se va a usar para la rampa trapezoidal
-unsigned long MIN_SPEED = deltaPulseTime + ((acelFactor / 100.0) * deltaPulseTime); // Tiempo en µs para velocidad mínima (más lento = mayor delay)
-unsigned long MAX_SPEED = deltaPulseTime - ((acelFactor / 100.0) * deltaPulseTime); // Tiempo en µs para velocidad máxima (más rápido = menor delay)
+bool usarRampa = true;   // Booleano para activar/desactivar la rampa
+int acelFactor;          // Acelfactor determina que porcentaje de la velocidad actual se va a usar para la rampa trapezoidal
+unsigned long MIN_SPEED; // Tiempo en µs para velocidad mínima (más lento = mayor delay)
+unsigned long MAX_SPEED;
 
 // Filtro EMA
 float alpha = 0.9; // Valor entre 0 y 1, donde 0 es sin filtrado y 1 es filtrado completo
@@ -113,6 +113,7 @@ int angleToSteps(float angulo);
 void setMicrostepping(int mode);
 void setStepsPerRev();
 void setDeltaPulseTime(unsigned long deltaPulseTime);
+void setAcelFactor(int acelFactor);
 float getPulsePeriod();
 float getPulseFrecuency();
 void capturarEstadoSwitches();
@@ -122,6 +123,7 @@ void procesarComandoAng(String command);
 void procesarComandoRampa(String command);
 void procesarComandoMove3(String command);
 void procesarComandoMoveCoord(String command);
+void procesarComandoAcel(String command);
 bool esAlcanzableDesdeHome(float q1, float q2, float q3);
 void mostrarMenuMicrostepping();
 void mostrarInfo();
@@ -160,9 +162,9 @@ void setup()
   pinMode(M1_PIN, OUTPUT);
   pinMode(M2_PIN, OUTPUT);
   delayMicroseconds(1000);
-  setMicrostepping(4); // Step (1/16)
+  setMicrostepping(6); // Step (1/16)
   setDeltaPulseTime(deltaPulseTime);
-
+  setAcelFactor(20);
   // Configuracion de interrupciones para los finales de carrera
   attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), ISR_sw1, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), ISR_sw2, CHANGE);
@@ -237,6 +239,11 @@ void loop()
     {
       procesarComandoDelta(command);
     }
+    else if (command.startsWith("acel"))
+    {
+      procesarComandoAcel(command);
+    }
+
     else if (command == "info")
     {
       mostrarInfo();
@@ -289,7 +296,7 @@ void loop()
 // === FUNCION PARA REALIZAR EL HOMING ===
 void home()
 {
-  Serial.println("Checking endstops states...");
+  Serial.println("Chequeando estado de los finales de carrera...");
 
   // Config direcciones hacia finales de carrera
   digitalWrite(DIR_PIN_Q1, HORARIO);     // Horaria
@@ -304,46 +311,43 @@ void home()
   if (sw1 || sw2 || sw3)
   {
     // Si alguno de los finales de carrera está pisado, retroceder
-    int angleBack = 40; // Grados a retroceder
+    int angleBack = 10;                            // Grados a retroceder
+    int aux_microsteppingMode = microsteppingMode; // Guardar el modo de microstepping actual
     setMicrostepping(5);
-    int stepsBack = angleToSteps(angleBack); // Pasos a retroceder
+    int stepsBack_q1 = angleToSteps(angleBack) * reductionQ[1]; // Pasos a retroceder en q1
+    int stepsBack_q2 = angleToSteps(angleBack) * reductionQ[2]; // Pasos a retroceder en q2
+    int stepsBack_q3 = angleToSteps(angleBack) * reductionQ[3]; // Pasos a retroceder en q3
+
     // Retroceso hasta que se liberen los finales de carrera
     if (sw1)
     {
       Serial.println("SW1 Pressed, going back Q1...");
       digitalWrite(DIR_PIN_Q1, ANTIHORARIO); // cambiar direccion para alejarse
-      for (int i = 0; i < stepsBack; i++)
+      for (int i = 0; i < stepsBack_q1; i++)
       {
-        digitalWrite(STEP_PIN_Q1, HIGH);
-        delayMicroseconds(deltaHommingPulseTime);
-        digitalWrite(STEP_PIN_Q1, LOW);
-        delayMicroseconds(deltaHommingPulseTime);
+        doAStep(STEP_PIN_Q1, deltaHommingPulseTime);
       }
     }
     if (sw2)
     {
       Serial.println("SW2 Pressed, going back Q2...");
       digitalWrite(DIR_PIN_Q2, ANTIHORARIO); // cambiar direccion para alejarse
-      for (int i = 0; i < stepsBack; i++)
+      for (int i = 0; i < stepsBack_q2; i++)
       {
-        digitalWrite(STEP_PIN_Q2, HIGH);
-        delayMicroseconds(deltaHommingPulseTime);
-        digitalWrite(STEP_PIN_Q2, LOW);
-        delayMicroseconds(deltaHommingPulseTime);
+        doAStep(STEP_PIN_Q2, deltaHommingPulseTime);
       }
     }
     if (sw3)
     {
       Serial.println("SW3 Pressed, going back Q3...");
       digitalWrite(DIR_PIN_Q3, HORARIO); // cambiar direccion para alejarse
-      for (int i = 0; i < stepsBack; i++)
+      for (int i = 0; i < stepsBack_q3; i++)
       {
-        digitalWrite(STEP_PIN_Q3, HIGH);
-        delayMicroseconds(deltaHommingPulseTime);
-        digitalWrite(STEP_PIN_Q3, LOW);
-        delayMicroseconds(deltaHommingPulseTime);
+        doAStep(STEP_PIN_Q3, deltaHommingPulseTime);
       }
     }
+    // vuelvo al microstepping que habia antes del home
+    setMicrostepping(aux_microsteppingMode);
   }
   Serial.println("Checking endstops OK...");
   // A partir de aca, iniciar la rutina de homing
@@ -381,6 +385,7 @@ void home()
   {
     doAStep(STEP_PIN_Q1, deltaHommingPulseTime);
   }
+
   // homming completado
   Serial.println("🏠✅ Homing completado.");
 }
@@ -524,6 +529,14 @@ void setMicrostepping(int mode)
   Serial.println("°");
 }
 
+// === FUNCION PARA SETEAR EL FACTOR DE ACELERACION ===
+void setAcelFactor(int acelPercentaje)
+{
+  acelFactor = acelPercentaje;
+  MIN_SPEED = deltaPulseTime + ((acelFactor / 100.0) * deltaPulseTime); // Tiempo en µs para velocidad mínima (más lento = mayor delay)
+  MAX_SPEED = deltaPulseTime - ((acelFactor / 100.0) * deltaPulseTime); // Tiempo en µs para velocidad máxima (más rápido = menor delay)
+}
+
 // === FUNCION PARA PROCESAR EL COMANDO <STEP> ===
 void procesarComandoStep(String command)
 {
@@ -583,6 +596,27 @@ void setDeltaPulseTime(unsigned long value)
   Serial.println("µs");
 }
 
+// === FUNCION QUE PROCESA EL COMANDO DE ACELERACION ===
+void procesarComandoAcel(String command)
+{
+  int acelPercentaje;
+  if (sscanf(command.c_str(), "acel %d", &acelPercentaje) == 1)
+  {
+    if (acelPercentaje < 0 || acelPercentaje > 100)
+    {
+      Serial.println("❌ Porcentaje de aceleración debe estar entre 0 y 100.");
+      return;
+    }
+    setAcelFactor(acelPercentaje);
+    Serial.print("✅ Factor de aceleración ajustado a: ");
+    Serial.print(acelPercentaje);
+    Serial.println("%");
+  }
+  else
+  {
+    Serial.println("❌ Comando inválido. Use: acel <porcentaje>");
+  }
+}
 // === FUNCION QUE PROCESA EL COMANDO PARA MOVER POR ANGULO ===
 void procesarComandoAng(String command)
 {
@@ -993,45 +1027,67 @@ void move3Motors(float ang1, float ang2, float ang3)
     // Para acelerar, la velocidad va de MIN_SPEED a MAX_SPEED. La fase de aceleracion dura ciertos pasos (totalSteps / 3).
     // Entonces, si tiene que llegar desde MIN_SPEED a MAX_SPEED en tantos pasos, el deltadelay es esa diferencia entre pulsos dividido por la cantidad de pasos de aceleración.
     unsigned long currentDelay = MIN_SPEED;
-    unsigned long deltaDelay = (accelSteps > 0)
-                                   ? (MIN_SPEED - MAX_SPEED) / accelSteps
-                                   : 0;
+    unsigned long deltaDelay;
 
-    // 4️⃣ Inicializo errores Bresenham
+    if (accelSteps > 0)
+    {
+      deltaDelay = (MIN_SPEED - MAX_SPEED) / accelSteps; // Diferencial de tiempo a incrementar en cada paso de aceleración
+    }
+    else
+      deltaDelay = 0; // Si no hay pasos de aceleración, no hay deltaDelay
+
+    // Fase de aceleracion desde MIN_SPEED a MAX_SPEED
+    // Fase constante a MAX_SPEED
+    // Fase de desaceleracion desde MAX_SPEED a MIN_SPEED
+
+    // Inicializo errores Bresenham
     int errA = 0, errB = 0, errC = 0;
 
-    // 5️⃣ Bucle maestro: maxSteps “ticks”
+    // Bucle maestro: maxSteps “ticks”
     for (int i = 0; i < maxSteps; i++)
     {
-      // 🔄 Actualizo currentDelay según fase
+      // Actualizo currentDelay según fase
       if (i < accelSteps && currentDelay > MAX_SPEED)
       {
-        currentDelay = max(currentDelay - deltaDelay, MAX_SPEED);
+        currentDelay = max(currentDelay - deltaDelay, MAX_SPEED); // Utilizo max(,) ya que si (currentDelay-deltaDelay) sobrepasa MAX_SPEED, se acotara el valor a MAX_SPEED
       }
       else if (i >= accelSteps + constSteps && currentDelay < MIN_SPEED)
       {
-        currentDelay = min(currentDelay + deltaDelay, MIN_SPEED);
+        currentDelay = min(currentDelay + deltaDelay, MIN_SPEED); // Utilizo min(,) ya que si (currentDelay+deltaDelay) sobrepasa MIN_SPEED, se acotara el valor a MIN_SPEED
       }
-      // ⚖️ Acumulo errores
+      // Acumulo errores de Bresenham
       errA += realSteps1;
       errB += realSteps2;
       errC += realSteps3;
 
-      // 🌀 Disparo pasos cuando el error cruza el umbral
+      // Si el motor acumula sufiente error, disparo paso
       if (errA >= maxSteps)
       {
-        doAStep(STEP_PIN_Q1, currentDelay);
+        // doAStep(STEP_PIN_Q1, currentDelay);
+        // errA -= maxSteps;
+        digitalWrite(STEP_PIN_Q1, HIGH);
+        digitalWrite(STEP_PIN_Q1, LOW);
         errA -= maxSteps;
+        delayMicroseconds(currentDelay);
       }
       if (errB >= maxSteps)
       {
-        doAStep(STEP_PIN_Q2, currentDelay);
+        // doAStep(STEP_PIN_Q2, currentDelay);
+        // errB -= maxSteps;
+        digitalWrite(STEP_PIN_Q2, HIGH);
+        delayMicroseconds(currentDelay);
+        digitalWrite(STEP_PIN_Q2, LOW);
         errB -= maxSteps;
+        delayMicroseconds(currentDelay);
       }
       if (errC >= maxSteps)
       {
-        doAStep(STEP_PIN_Q3, currentDelay);
+        // doAStep(STEP_PIN_Q3, currentDelay);
+        // errC -= maxSteps;
+        digitalWrite(STEP_PIN_Q3, HIGH);
+        digitalWrite(STEP_PIN_Q3, LOW);
         errC -= maxSteps;
+        delayMicroseconds(currentDelay);
       }
     }
 
