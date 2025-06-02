@@ -17,7 +17,7 @@
 #define HORARIO LOW
 #define PISADO HIGH
 #define NO_PISADO LOW
-#define L1 136.65 + 10.0
+#define L1 146.65
 #define L2 150
 #define L3 150
 #define Q3_OFFSET 130.0 // Offset de Q3 respecto a la posicion de DH
@@ -28,11 +28,6 @@ const float Q2_MIN = 0.0;
 const float Q2_MAX = 160.0;
 const float Q3_MIN = 0.0;
 const float Q3_MAX = -300.0;
-
-const float STEP = 10.0; // resolución del muestreo en mm
-const float X_MIN = -150, X_MAX = +150;
-const float Z_MIN = 0, Z_MAX = 400;
-float y = 45; // si trabajas en el plano X-Z
 
 // Variables globales para estados de finales de carrera
 volatile bool end_sw1 = false;
@@ -63,10 +58,10 @@ int stepsPerRev = round(360.0 / stepAngle); // Valor por defecto (Full Step)
 
 // Variable para modificar el tiempo entre cambio de flancos (us)
 u_int16_t deltaPulseTime = 1500;        // Tiempo default
-u_int16_t deltaHommingPulseTime = 1500; // Tiempo default home
+u_int16_t deltaHommingPulseTime = 2000; // Tiempo default home
 
 // Modos de microstepping
-int microsteppingMode = 6; // Modo por defecto
+int microsteppingMode = 5; // Modo por defecto
 String microsteppingModes[8] = {
     "0 - > Full Step (1/1) -> Default -> 1.8°",
     "1 - > Half Step (1/2) -> " + String(1.8 / 2) + "°",
@@ -98,10 +93,17 @@ struct encoderData
 const int ENCODERS_UPDATE_INTERVAL_MS = 10; // Intervalo de actualización en ms
 unsigned long lastEncoderReadTime = 0;      // Variable para almacenar el tiempo de la última lectura
 
-encoderData encoders[3]; // Estructura para almacenar los datos de los encoders
+encoderData encoders[3];  // Estructura para almacenar los datos de los encoders
+#define ANLGE_ERR_TOL 4.0 // Tolerancia de error en grados para el angulo de los encoders
 
 // Angulos de cinematica inversa
 float angsToMove[3];
+
+// Homing
+float homeAngle[3];
+float actualAngle[3];
+bool homingDone = false;  // Variable para indicar si el homing se ha completado
+bool useEncoders = false; // Variable para activar/desactivar el uso de encoders
 
 // Prototipos
 void home();
@@ -116,6 +118,7 @@ void setDeltaPulseTime(unsigned long deltaPulseTime);
 void setAcelFactor(int acelFactor);
 float getPulsePeriod();
 float getPulseFrecuency();
+float getAngleFromHome(uint8_t nEnc);
 void capturarEstadoSwitches();
 void procesarComandoStep(String command);
 void procesarComandoDelta(String command);
@@ -124,6 +127,7 @@ void procesarComandoRampa(String command);
 void procesarComandoMove3(String command);
 void procesarComandoMoveCoord(String command);
 void procesarComandoAcel(String command);
+void procesarComandoEnc(String command);
 bool esAlcanzableDesdeHome(float q1, float q2, float q3);
 void mostrarMenuMicrostepping();
 void mostrarInfo();
@@ -139,7 +143,8 @@ uint16_t readEncoder(uint8_t chan_encoder);
 void updateAngleFilteredValue(uint8_t chanEncoder);
 void move3Motors(float ang1, float ang2, float ang3);
 void inverseKinematics(float px, float py, float pz);
-void barridoPuntos();
+void saveHomeAngles();
+void correctPosition();
 
 void setup()
 {
@@ -162,9 +167,9 @@ void setup()
   pinMode(M1_PIN, OUTPUT);
   pinMode(M2_PIN, OUTPUT);
   delayMicroseconds(1000);
-  setMicrostepping(6); // Step (1/16)
+  setMicrostepping(5); // Step (1/16)
   setDeltaPulseTime(deltaPulseTime);
-  setAcelFactor(20);
+  setAcelFactor(60);
   // Configuracion de interrupciones para los finales de carrera
   attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW1_PIN), ISR_sw1, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ENDSTOP_SW2_PIN), ISR_sw2, CHANGE);
@@ -181,6 +186,8 @@ void setup()
     encoders[i].filteredAngle = 0.0;
   }
 
+  homingDone = false;
+  useEncoders = false; 
   // Mensaje de bienvenida
   Serial.println("🚀 Ingrese 'home' para iniciar");
 }
@@ -243,7 +250,10 @@ void loop()
     {
       procesarComandoAcel(command);
     }
-
+    else if (command.startsWith("enc"))
+    {
+      procesarComandoEnc(command);
+    }
     else if (command == "info")
     {
       mostrarInfo();
@@ -296,8 +306,12 @@ void loop()
 // === FUNCION PARA REALIZAR EL HOMING ===
 void home()
 {
+  homingDone = false;
   Serial.println("Chequeando estado de los finales de carrera...");
-
+  // Guardar el microstepping actual para restaurarlo al final
+  int angleBack = 10;                            // Grados a retroceder
+  int aux_microsteppingMode = microsteppingMode; // Guardar el modo de microstepping actual
+  setMicrostepping(4);
   // Config direcciones hacia finales de carrera
   digitalWrite(DIR_PIN_Q1, HORARIO);     // Horaria
   digitalWrite(DIR_PIN_Q2, HORARIO);     // Horaria
@@ -311,9 +325,7 @@ void home()
   if (sw1 || sw2 || sw3)
   {
     // Si alguno de los finales de carrera está pisado, retroceder
-    int angleBack = 10;                            // Grados a retroceder
-    int aux_microsteppingMode = microsteppingMode; // Guardar el modo de microstepping actual
-    setMicrostepping(5);
+
     int stepsBack_q1 = angleToSteps(angleBack) * reductionQ[1]; // Pasos a retroceder en q1
     int stepsBack_q2 = angleToSteps(angleBack) * reductionQ[2]; // Pasos a retroceder en q2
     int stepsBack_q3 = angleToSteps(angleBack) * reductionQ[3]; // Pasos a retroceder en q3
@@ -346,8 +358,6 @@ void home()
         doAStep(STEP_PIN_Q3, deltaHommingPulseTime);
       }
     }
-    // vuelvo al microstepping que habia antes del home
-    setMicrostepping(aux_microsteppingMode);
   }
   Serial.println("Checking endstops OK...");
   // A partir de aca, iniciar la rutina de homing
@@ -386,8 +396,14 @@ void home()
     doAStep(STEP_PIN_Q1, deltaHommingPulseTime);
   }
 
+  // vuelvo al microstepping que habia antes del home
+  setMicrostepping(aux_microsteppingMode);
   // homming completado
+  homingDone = true;
+  delay(ENCODERS_UPDATE_INTERVAL_MS);
   Serial.println("🏠✅ Homing completado.");
+
+  saveHomeAngles();
 }
 
 // === FUNCION QUE REALIZA UN PASO ===
@@ -633,6 +649,8 @@ void procesarComandoAng(String command)
     Serial.print(pasos);
     Serial.println(" pasos)");
     moveMotor(motor, pasos);
+    float angleFromHome = getAngleFromHome(motor);
+    Serial.printf("El angulo q%d desde la posición de home es: %.2f°\n", motor, angleFromHome);
   }
   else
   {
@@ -707,6 +725,21 @@ void procesarComandoMoveCoord(String command)
   else
   {
     Serial.println("❌ Uso: movecoord <px> <py> <pz>");
+  }
+}
+
+// === FUNCION QUE PROCESA EL COMANDO PARA ACTIVAR O DESACTIVAR LA CORRECION CON ENCODERS ===
+void procesarComandoEnc(String command) {
+  if (command.equalsIgnoreCase("enc on")) {
+    useEncoders = true;
+    Serial.println("🔧 Corrección de encoders ACTIVADA");
+  }
+  else if (command.equalsIgnoreCase("enc off")) {
+    useEncoders = false;
+    Serial.println("🔧 Corrección de encoders DESACTIVADA");
+  }
+  else {
+    Serial.println("❌ Comando inválido. Use: enc on | enc off");
   }
 }
 
@@ -972,8 +1005,8 @@ float leerEncoder(uint8_t chan_encoder, bool printResult = false)
   uint8_t reduction = reductionQ[num_encoder];
 
   float realAngle = angleDegrees / reduction; // Aplica la reducción correspondiente
-
-  // Serial.println("Encoder: " + String(num_encoder) + "-> " + String(realAngle) + "°");
+  if (printResult)
+    Serial.println("Encoder: " + String(num_encoder) + "-> " + String(realAngle) + "°");
 
   return realAngle; // Retorna el valor en grados afectado por la reducción
 }
@@ -1120,6 +1153,12 @@ void move3Motors(float ang1, float ang2, float ang3)
       }
     }
   }
+
+  // Algoritmo de correcion de posicion mediante encoders
+  if (useEncoders)
+  {
+    correctPosition();
+  }
 }
 // === INTERRUPCIONES ENDSTOPS ===
 IRAM_ATTR void ISR_sw1()
@@ -1249,25 +1288,150 @@ bool esAlcanzableDesdeHome(float q1, float q2, float q3)
   }
 }
 
-void barridoPuntos()
+void saveHomeAngles()
 {
-  for (float x = X_MIN; x <= X_MAX; x += STEP)
+  // Esta funcion guarda los angulos de los encoders en la posicion de home
+  if (homingDone)
   {
-    for (float z = Z_MIN; z <= Z_MAX; z += STEP)
+    for (uint8_t i = 0; i < 3; i++)
     {
-      inverseKinematics(x, y, z);
-      float q1 = angsToMove[0],
-            q2 = angsToMove[1],
-            q3 = angsToMove[2];
-
-      bool ok = (q1 >= Q1_MIN && q1 <= Q1_MAX) && (q2 >= Q2_MIN && q2 <= Q2_MAX) && (q3 >= Q3_MIN && q3 <= Q3_MAX);
-
-      if (ok)
-      {
-        // (x,z) es alcanzable dentro de tus restricciones
-        Serial.printf("OK: x=%.1f z=%.1f → q1=%.1f q2=%.1f q3=%.1f\n",
-                      x, z, q1, q2, q3);
-      }
+      // homeAngle[i] = getAngleFilteredValue(i+1);
+      homeAngle[i] = leerEncoder(i, false);
+      Serial.printf("Encoder %d homing angle saved = %.2f°\n", i + 1, homeAngle[i]);
     }
+    Serial.println("✅ Home angles guardados.\n");
   }
+  else
+  {
+    Serial.printf("Para relizar el guardado de angulos de home, primero debe realizar el <home>\n");
+  }
+}
+
+float getAngleFromHome(uint8_t nEnc)
+{
+  // Esta funcion va a buscar el valor de angulo filtrado y lo compara con el zero position marcado seteado por la funcion saveHomeAngles().
+  // enresumen, normaliza el angulo
+  if (!homingDone)
+    return Serial.printf("Para utilizar getAngleFromHome primero debes realizar <home>\n");
+  ;
+  // ch=1..3, pero nuestro arreglo es 0..2:
+  // float now = getAngleFilteredValue(nEnc);        // lect. EMA actual (0..360)
+  float now = leerEncoder(nEnc - 1, false); // lect. cruda actual (0..360)
+  float zero = homeAngle[nEnc - 1];         // valor de home (0..360)
+  float delta = now - zero;                 // diferencia cruda
+  // envolver en [0..360)
+  if (delta < 0)
+    delta += 360.0;
+  else if (delta >= 360)
+    delta -= 360.0;
+  if (delta > 180.0)
+    delta -= 360.0;
+  return delta; // siempre 0..360
+}
+
+void correctPosition()
+{
+
+  Serial.printf("Iniciando el algoritmo de coreccion de posicion\n");
+  Serial.printf("Estoy en Q1: %2.f\n", getAngleFromHome(1));
+  Serial.printf("Estoy en Q2: %2.f\n", getAngleFromHome(2));
+  Serial.printf("Estoy en Q3: %2.f\n", getAngleFromHome(3));
+  delay(1);
+  // Corrección para Q2
+  float q1_mooved = getAngleFromHome(1);          // Angulo actual del motor 1
+  float q1_diference = angsToMove[0] - q1_mooved; // Diferencia entre el angulo actual y el angulo deseado
+
+  // 2. Comparo con el angulo obtenido de la cin. inv. con en engulo actual
+  // —————— Corrección para Q1 ——————
+  if (q1_diference > ANLGE_ERR_TOL) {
+    // mueves en sentido antihorario hasta acercarte
+    digitalWrite(DIR_PIN_Q1, ANTIHORARIO);
+    while (abs(q1_diference) >= ANLGE_ERR_TOL) {
+      doAStep(STEP_PIN_Q1, deltaPulseTime);
+      q1_mooved    = getAngleFromHome(1);
+      q1_diference = angsToMove[0] - q1_mooved;
+    }
+    Serial.printf("Q1 corregido: %.2f°\n", q1_diference);
+  }
+  else if (q1_diference < -ANLGE_ERR_TOL) {
+    // mueves en sentido horario
+    digitalWrite(DIR_PIN_Q1, HORARIO);
+    while (abs(q1_diference) >= ANLGE_ERR_TOL) {
+      doAStep(STEP_PIN_Q1, deltaPulseTime);
+      q1_mooved    = getAngleFromHome(1);
+      q1_diference = angsToMove[0] - q1_mooved;
+    }
+    Serial.printf("Q1 corregido: %.2f°\n", q1_diference);
+  }
+  // EN ESTE PUNTO, ya sea que Q1 necesitara corrección o estuviera OK, seguimos a Q2
+
+  // —————— Corrección para Q2 ——————
+  float q2_mooved     = getAngleFromHome(2);
+  float q2_diference  = angsToMove[1] - q2_mooved;
+  if (q2_diference > ANLGE_ERR_TOL) {
+    Serial.printf("Diferencia de Q2 PRE-corrección: %.2f°\n", q2_diference);
+    digitalWrite(DIR_PIN_Q2, ANTIHORARIO);
+    while (abs(q2_diference) >= ANLGE_ERR_TOL) {
+      doAStep(STEP_PIN_Q2, deltaPulseTime);
+      q2_mooved     = getAngleFromHome(2);
+      q2_diference  = angsToMove[1] - q2_mooved;
+    }
+    Serial.printf("Diferencia de Q2 POST-corrección: %.2f°\n", q2_diference);
+  }
+  else if (q2_diference < -ANLGE_ERR_TOL) {
+    Serial.printf("Diferencia de Q2 PRE-corrección: %.2f°\n", q2_diference);
+    digitalWrite(DIR_PIN_Q2, HORARIO);
+    while (abs(q2_diference) >= ANLGE_ERR_TOL) {
+      doAStep(STEP_PIN_Q2, deltaPulseTime);
+      q2_mooved     = getAngleFromHome(2);
+      q2_diference  = angsToMove[1] - q2_mooved;
+    }
+    Serial.printf("Diferencia de Q2 POST-corrección: %.2f°\n", q2_diference);
+  }
+  // Y seguimos a Q3
+
+  // —————— Corrección para Q3 ——————
+  float q3_mooved    = getAngleFromHome(3);
+float q3_diference = angsToMove[2] - q3_mooved;
+
+// ── Normalizar en [−180 … +180] ──
+if (q3_diference >  180.0f) q3_diference -= 360.0f;
+if (q3_diference < -180.0f) q3_diference += 360.0f;
+
+Serial.printf("Diferencia de Q3 normalizada: %.2f°\n", q3_diference);
+
+// Si excede tolerancia positiva → girar en sentido “aumentar ángulo”
+if (q3_diference > ANLGE_ERR_TOL) {
+  Serial.printf("Diferencia de Q3 PRE-corrección: %.2f°\n", q3_diference);
+  digitalWrite(DIR_PIN_Q3, HORARIO);
+  while (abs(q3_diference) >= ANLGE_ERR_TOL) {
+    doAStep(STEP_PIN_Q3, deltaPulseTime);
+    delay(1);
+    // Recalcular y volver a normalizar:
+    q3_mooved    = getAngleFromHome(3);
+    q3_diference = angsToMove[2] - q3_mooved;
+    if (q3_diference >  180.0f) q3_diference -= 360.0f;
+    if (q3_diference < -180.0f) q3_diference += 360.0f;
+  }
+  Serial.printf("Diferencia de Q3 POST-corrección: %.2f°\n", q3_diference);
+}
+// Si excede tolerancia negativa → girar en sentido “disminuir ángulo”
+else if (q3_diference < -ANLGE_ERR_TOL) {
+  Serial.printf("Diferencia de Q3 PRE-corrección: %.2f°\n", q3_diference);
+  digitalWrite(DIR_PIN_Q3, ANTIHORARIO);
+  while (abs(q3_diference) >= ANLGE_ERR_TOL) {
+    doAStep(STEP_PIN_Q3, deltaPulseTime);
+    delay(1);
+    // Recalcular y normalizar de nuevo:
+    q3_mooved    = getAngleFromHome(3);
+    q3_diference = angsToMove[2] - q3_mooved;
+    if (q3_diference >  180.0f) q3_diference -= 360.0f;
+    if (q3_diference < -180.0f) q3_diference += 360.0f;
+  }
+  Serial.printf("Diferencia de Q3 POST-corrección: %.2f°\n", q3_diference);
+}
+// Si ya está dentro de tolerancia, nada más.
+else {
+  return;
+}
 }
